@@ -61,5 +61,27 @@ struct GhosttyIOSHardwareKeyEventTests {
         #expect(followUpPress?.text == "n")
         #expect(followUpRelease?.text == nil)
     }
+
+    @Test
+    func dispatchTreatsFalseReturnAsStillDispatched() {
+        let descriptor = Ghostty.Input.HardwareKeyDescriptor(
+            keyCode: .keyboardN,
+            modifierFlags: [],
+            characters: "n",
+            charactersIgnoringModifiers: "n"
+        )
+        var sendCalls = 0
+        let dispatched = Ghostty.Input.KeyEvent.dispatchHardwareKey(
+            descriptor,
+            action: .press
+        ) { _ in
+            sendCalls += 1
+            // Ghostty may return false for non-binding keys even though dispatch succeeds.
+            return false
+        }
+
+        #expect(dispatched)
+        #expect(sendCalls == 1)
+    }
 }
 #endif

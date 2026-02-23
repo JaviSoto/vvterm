@@ -161,6 +161,23 @@ extension Ghostty.Input {
         init?(uiKey: UIKey, action: Action) {
             self.init(hardwareKey: .init(uiKey: uiKey), action: action)
         }
+
+        /// Dispatch a hardware key event to Ghostty.
+        ///
+        /// Returns true when the key can be represented and dispatched.
+        /// The sender's boolean return value is intentionally ignored here because
+        /// Ghostty uses that value to signal binding handling, not transport success.
+        static func dispatchHardwareKey(
+            _ hardwareKey: HardwareKeyDescriptor,
+            action: Action,
+            send: (ghostty_input_key_s) -> Bool
+        ) -> Bool {
+            guard let event = KeyEvent(hardwareKey: hardwareKey, action: action) else {
+                return false
+            }
+            _ = event.withCValue(execute: send)
+            return true
+        }
         #endif
 
         /// Executes a closure with a temporary C representation of this KeyEvent.

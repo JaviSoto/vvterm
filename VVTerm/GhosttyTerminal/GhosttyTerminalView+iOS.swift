@@ -1112,11 +1112,10 @@ class GhosttyTerminalView: UIView {
         action: ghostty_input_action_e,
         surface cSurface: ghostty_surface_t
     ) -> Bool {
-        guard let event = Ghostty.Input.KeyEvent(uiKey: key, action: ghosttyInputAction(action))
-        else {
-            return false
-        }
-        return event.withCValue { cEvent in
+        Ghostty.Input.KeyEvent.dispatchHardwareKey(
+            .init(uiKey: key),
+            action: ghosttyInputAction(action)
+        ) { cEvent in
             ghostty_surface_key(cSurface, cEvent)
         }
     }
