@@ -1,6 +1,7 @@
 import CloudKit
 import Foundation
 import os.log
+import Security
 
 // MARK: - CloudKit Manager
 
@@ -19,9 +20,12 @@ final class CloudKitManager {
     var isAvailable: Bool { statusStore.syncState.isAvailable }
     var cloudKitSyncGeneration = UUID()
 
-    let container: CKContainer
-    let database: CKDatabase
-    let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "CloudKit")
+    let container: CKContainer?
+    let database: CKDatabase?
+    let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "VVTerm",
+        category: "CloudKit"
+    )
     let recordZoneName = CloudKitSyncConstants.recordZoneName
     lazy var recordZone = CKRecordZone(zoneName: recordZoneName)
     var recordZoneID: CKRecordZone.ID { recordZone.zoneID }
@@ -30,7 +34,7 @@ final class CloudKitManager {
 
     let syncEnabled: @MainActor @Sendable () -> Bool
     let fetchAccountStatus: @MainActor @Sendable () async throws -> CKAccountStatus
-    var isSyncEnabled: Bool { syncEnabled() }
+    var isSyncEnabled: Bool { syncEnabled() && database != nil }
     struct AccountStatusCheck {
         let id: UUID
         let generation: UUID
@@ -63,10 +67,36 @@ final class CloudKitManager {
     var ensureZoneTask: Task<Void, Error>?
     var zoneReady: Bool
 
+    private static func resolveCloudKitContainerID() -> String? {
+        #if os(iOS) || os(tvOS) || os(watchOS)
+        // Ad-hoc iOS builds frequently ship without CloudKit entitlements.
+        return nil
+        #else
+        let entitlementKey = "com.apple.developer.icloud-container-identifiers" as CFString
+        guard let task = SecTaskCreateFromSelf(nil),
+              let entitlement = SecTaskCopyValueForEntitlement(task, entitlementKey, nil) else {
+            return nil
+        }
+
+        if let containerIDs = entitlement as? [String] {
+            return containerIDs.first
+        }
+        return entitlement as? String
+        #endif
+    }
+
     private convenience init() {
-        let container = CKContainer(
-            identifier: CloudKitSyncConstants.cloudKitContainerIdentifier
-        )
+        guard let containerID = Self.resolveCloudKitContainerID() else {
+            self.init(
+                container: nil,
+                syncEnabled: { SyncSettings.isEnabled },
+                accountStatus: { throw CloudKitError.notAvailable }
+            )
+            logger.warning("CloudKit disabled: missing iCloud container entitlements")
+            return
+        }
+
+        let container = CKContainer(identifier: containerID)
         self.init(
             container: container,
             syncEnabled: { SyncSettings.isEnabled },
@@ -75,7 +105,7 @@ final class CloudKitManager {
     }
 
     init(
-        container: CKContainer,
+        container: CKContainer?,
         syncEnabled: @escaping @MainActor @Sendable () -> Bool,
         accountStatus: @escaping @MainActor @Sendable () async throws -> CKAccountStatus,
         initialZoneReady: Bool = UserDefaults.standard.bool(
@@ -83,7 +113,7 @@ final class CloudKitManager {
         )
     ) {
         self.container = container
-        database = container.privateCloudDatabase
+        database = container?.privateCloudDatabase
         self.syncEnabled = syncEnabled
         fetchAccountStatus = accountStatus
         zoneReady = initialZoneReady
@@ -95,5 +125,12 @@ final class CloudKitManager {
         } else {
             applySyncDisabledState()
         }
+    }
+
+    func requireDatabase() throws -> CKDatabase {
+        guard let database else {
+            throw CloudKitError.notAvailable
+        }
+        return database
     }
 }

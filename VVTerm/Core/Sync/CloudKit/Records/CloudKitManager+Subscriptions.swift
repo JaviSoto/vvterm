@@ -16,6 +16,7 @@ extension CloudKitManager {
             return
         }
         guard isCurrentGeneration(generation), isAvailable else { return }
+        guard let database = try? requireDatabase() else { return }
 
         let subscriptionID = CloudKitSyncConstants.databaseSubscriptionID
 

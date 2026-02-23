@@ -62,6 +62,23 @@ private final class CloudKitSyncEnabledState {
 @MainActor
 struct CloudKitManagerLifecycleTests {
     @Test
+    func missingContainerPublishesDisabledStateWithoutCheckingAccount() {
+        var didCheckAccount = false
+        let manager = CloudKitManager(
+            container: nil,
+            syncEnabled: { true },
+            accountStatus: {
+                didCheckAccount = true
+                return .available
+            }
+        )
+
+        #expect(manager.accountState == .disabled)
+        #expect(manager.syncStatus == .disabled)
+        #expect(!didCheckAccount)
+    }
+
+    @Test
     func disabledInitializationPublishesDisabledState() {
         let syncEnabled = CloudKitSyncEnabledState()
         syncEnabled.value = false

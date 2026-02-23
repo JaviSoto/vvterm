@@ -91,6 +91,7 @@ extension CloudKitManager {
         guard isAvailable else {
             throw CloudKitError.notAvailable
         }
+        let database = try requireDatabase()
         try await ensureCustomZone()
         let record = try await withZoneRetry {
             try await database.record(for: recordID)
@@ -109,6 +110,7 @@ extension CloudKitManager {
 
     func deleteCloudKitRecord(_ recordID: CKRecord.ID) async throws {
         let generation = cloudKitSyncGeneration
+        let database = try requireDatabase()
         _ = try await withZoneRetry {
             try await database.modifyRecords(saving: [], deleting: [recordID])
         }
@@ -221,6 +223,7 @@ extension CloudKitManager {
         budget: CloudKitSyncBudget,
         desiredKeys: [String]
     ) async throws -> ZoneChangeBatch {
+        let database = try requireDatabase()
         let logger = logger
         let completion = CloudKitOperationContinuation<ZoneChangeBatch>()
         return try await withTaskCancellationHandler {
@@ -319,7 +322,7 @@ extension CloudKitManager {
                 }
 
                 completion.install(operation)
-                self.database.add(operation)
+                database.add(operation)
             }
         } onCancel: {
             completion.cancel()
@@ -372,6 +375,7 @@ extension CloudKitManager {
         _ record: CKRecord,
         savePolicy: CKModifyRecordsOperation.RecordSavePolicy
     ) async throws {
+        let database = try requireDatabase()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let operation = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
             operation.savePolicy = savePolicy

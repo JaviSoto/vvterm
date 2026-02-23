@@ -58,7 +58,7 @@ extension CloudKitManager {
             let statusLogValue = String(describing: resolvedAccountState)
 
             logger.info("CloudKit account status: \(statusLogValue)")
-            logger.info("Container identifier: \(self.container.containerIdentifier ?? "nil")")
+            logger.info("Container identifier: \(self.container?.containerIdentifier ?? "nil")")
 
             statusStore.accountState = resolvedAccountState
             if status == .available {
@@ -87,7 +87,7 @@ extension CloudKitManager {
 
     func handleSyncToggle(_ enabled: Bool) {
         let generation = advanceSyncGeneration()
-        if enabled {
+        if enabled, isSyncEnabled {
             statusStore.accountState = .checking
             statusStore.syncState.markCheckingAccount()
             Task { [weak self] in

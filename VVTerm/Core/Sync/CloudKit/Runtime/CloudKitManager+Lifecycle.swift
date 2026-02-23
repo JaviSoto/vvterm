@@ -68,6 +68,7 @@ extension CloudKitManager {
     }
 
     func createZoneIfNeeded() async throws {
+        let database = try requireDatabase()
         let results = try await database.recordZones(for: [recordZoneID])
         if let result = results[recordZoneID] {
             switch result {
