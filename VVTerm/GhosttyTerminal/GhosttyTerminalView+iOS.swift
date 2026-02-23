@@ -86,6 +86,7 @@ class GhosttyTerminalView: UIView {
 
     private var isSelecting = false
     private var isScrolling = false
+    private var activeIndirectButtonMask: UIEvent.ButtonMask = []
     private lazy var selectionRecognizer: UILongPressGestureRecognizer = {
         let recognizer = UILongPressGestureRecognizer(
             target: self,
@@ -94,6 +95,9 @@ class GhosttyTerminalView: UIView {
         recognizer.minimumPressDuration = 0.2
         recognizer.allowableMovement = 8
         recognizer.cancelsTouchesInView = true
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
         return recognizer
     }()
 
@@ -103,6 +107,21 @@ class GhosttyTerminalView: UIView {
             action: #selector(handleDoubleTap(_:))
         )
         recognizer.numberOfTapsRequired = 2
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
+        return recognizer
+    }()
+
+    private lazy var singleTapRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(
+            target: self,
+            action: #selector(handleSingleTap(_:))
+        )
+        recognizer.numberOfTapsRequired = 1
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
         return recognizer
     }()
 
@@ -112,6 +131,9 @@ class GhosttyTerminalView: UIView {
             action: #selector(handleTripleTap(_:))
         )
         recognizer.numberOfTapsRequired = 3
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
         return recognizer
     }()
 
@@ -120,7 +142,22 @@ class GhosttyTerminalView: UIView {
             target: self,
             action: #selector(handlePanGesture(_:))
         )
-        recognizer.maximumNumberOfTouches = 1
+        recognizer.maximumNumberOfTouches = 2
+        if #available(iOS 13.4, *) {
+            recognizer.allowedScrollTypesMask = [.continuous, .discrete]
+            recognizer.allowedTouchTypes = [
+                NSNumber(value: UITouch.TouchType.direct.rawValue),
+                NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
+            ]
+        }
+        return recognizer
+    }()
+
+    private lazy var hoverRecognizer: UIHoverGestureRecognizer = {
+        let recognizer = UIHoverGestureRecognizer(
+            target: self,
+            action: #selector(handleHoverGesture(_:))
+        )
         return recognizer
     }()
 
@@ -209,17 +246,26 @@ class GhosttyTerminalView: UIView {
         // Setup gesture recognizers with delegate for simultaneous recognition
         selectionRecognizer.delegate = self
         scrollRecognizer.delegate = self
+        hoverRecognizer.delegate = self
+        singleTapRecognizer.delegate = self
         doubleTapRecognizer.delegate = self
         tripleTapRecognizer.delegate = self
 
+        // Single tap should wait for multi-tap gestures to fail.
+        singleTapRecognizer.require(toFail: doubleTapRecognizer)
         // Triple tap should require double tap to fail first
         doubleTapRecognizer.require(toFail: tripleTapRecognizer)
 
         addGestureRecognizer(selectionRecognizer)
         addGestureRecognizer(scrollRecognizer)
+        addGestureRecognizer(hoverRecognizer)
+        addGestureRecognizer(singleTapRecognizer)
         addGestureRecognizer(doubleTapRecognizer)
         addGestureRecognizer(tripleTapRecognizer)
         isUserInteractionEnabled = true
+        if #available(iOS 13.4, *) {
+            addInteraction(UIPointerInteraction(delegate: self))
+        }
 
         // Setup edit menu interaction for copy/paste
         let interaction = UIEditMenuInteraction(delegate: self)
@@ -643,23 +689,92 @@ class GhosttyTerminalView: UIView {
 
     // MARK: - Touch Input
 
+    private func ghosttyButton(from buttonMask: UIEvent.ButtonMask) -> Ghostty.Input.MouseButton? {
+        if buttonMask.contains(.secondary) { return .right }
+        if buttonMask.contains(.primary) { return .left }
+        return nil
+    }
+
+    private func syncIndirectPointerButtons(
+        _ buttonMask: UIEvent.ButtonMask,
+        surface: Ghostty.Surface
+    ) {
+        let released = activeIndirectButtonMask.subtracting(buttonMask)
+        let pressed = buttonMask.subtracting(activeIndirectButtonMask)
+
+        for candidate in [UIEvent.ButtonMask.primary, .secondary] {
+            if released.contains(candidate), let button = ghosttyButton(from: candidate) {
+                surface.sendMouseButton(.init(action: .release, button: button, mods: []))
+            }
+        }
+
+        for candidate in [UIEvent.ButtonMask.primary, .secondary] {
+            if pressed.contains(candidate), let button = ghosttyButton(from: candidate) {
+                surface.sendMouseButton(.init(action: .press, button: button, mods: []))
+            }
+        }
+
+        activeIndirectButtonMask = buttonMask
+    }
+
+    private func handleIndirectPointerTouch(
+        _ touches: Set<UITouch>,
+        event: UIEvent?
+    ) -> Bool {
+        guard let surface = surface else { return false }
+        guard let touch = touches.first(where: { $0.type == .indirectPointer }) else { return false }
+
+        let pos = ghosttyPoint(touch.location(in: self))
+        surface.sendMousePos(.init(x: pos.x, y: pos.y, mods: []))
+
+        let buttonMask = event?.buttonMask ?? activeIndirectButtonMask
+
+        switch touch.phase {
+        case .began, .moved, .stationary:
+            syncIndirectPointerButtons(buttonMask, surface: surface)
+        case .ended, .cancelled:
+            syncIndirectPointerButtons([], surface: surface)
+        default:
+            break
+        }
+
+        if touch.phase == .ended || touch.phase == .cancelled {
+            if let allTouches = event?.allTouches {
+                let stillHovering = allTouches.contains {
+                    $0 != touch && $0.type == .indirectPointer && $0.phase != .ended && $0.phase != .cancelled
+                }
+                if !stillHovering {
+                    surface.sendMousePos(.init(x: -1, y: -1, mods: []))
+                }
+            } else {
+                surface.sendMousePos(.init(x: -1, y: -1, mods: []))
+            }
+        }
+
+        requestRender()
+        return true
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
-        // Tap just focuses keyboard - no mouse events (avoids accidental selection)
+        // Keep keyboard focus eager; click forwarding is handled by singleTapRecognizer.
         _ = becomeFirstResponder()
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        // Pan gesture handles scrolling, long press handles selection
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     private func ghosttyPoint(_ location: CGPoint) -> CGPoint {
@@ -682,6 +797,23 @@ class GhosttyTerminalView: UIView {
     private var momentumDisplayLink: CADisplayLink?
     private var momentumVelocity: CGPoint = .zero
     private var momentumPhase: Ghostty.Input.Momentum = .none
+
+    @objc private func handleHoverGesture(_ recognizer: UIHoverGestureRecognizer) {
+        guard let surface = surface else { return }
+        let location = recognizer.location(in: self)
+
+        switch recognizer.state {
+        case .began, .changed:
+            let pos = ghosttyPoint(location)
+            surface.sendMousePos(.init(x: pos.x, y: pos.y, mods: []))
+            requestRender()
+        case .ended, .cancelled:
+            surface.sendMousePos(.init(x: -1, y: -1, mods: []))
+            requestRender()
+        default:
+            break
+        }
+    }
 
     @objc private func handlePanGesture(_ recognizer: UIPanGestureRecognizer) {
         guard let surface = surface else { return }
@@ -791,6 +923,25 @@ class GhosttyTerminalView: UIView {
     }
 
     // MARK: - Selection Gestures
+
+    /// Single tap sends a click to the terminal so TUIs can react to touch as mouse input.
+    @objc private func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
+        guard let surface = surface else {
+            _ = becomeFirstResponder()
+            return
+        }
+        if isSelecting || isScrolling { return }
+
+        let location = recognizer.location(in: self)
+        let pos = ghosttyPoint(location)
+
+        _ = becomeFirstResponder()
+
+        surface.sendMousePos(.init(x: pos.x, y: pos.y, mods: []))
+        surface.sendMouseButton(.init(action: .press, button: .left, mods: []))
+        surface.sendMouseButton(.init(action: .release, button: .left, mods: []))
+        requestRender()
+    }
 
     /// Double-tap to select word
     @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
@@ -1522,6 +1673,17 @@ extension GhosttyTerminalView: UIGestureRecognizerDelegate {
             return otherGestureRecognizer.state == .began
         }
         return false
+    }
+}
+
+@available(iOS 13.4, *)
+extension GhosttyTerminalView: UIPointerInteractionDelegate {
+    func pointerInteraction(
+        _ interaction: UIPointerInteraction,
+        regionFor request: UIPointerRegionRequest,
+        defaultRegion: UIPointerRegion
+    ) -> UIPointerRegion? {
+        defaultRegion
     }
 }
 
