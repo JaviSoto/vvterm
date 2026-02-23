@@ -146,6 +146,7 @@ class GhosttyTerminalView: UIView {
     private var fallbackHardwarePressModifiers: [UInt16: UIKeyModifierFlags] = [:]
     private var systemTextInputPresses: Set<UInt16> = []
     private var hardwareInsertTextSuppression = HardwareInsertTextSuppressionState()
+    private var hardwareModifierState = HardwareModifierState()
     private var lastGhosttyHardwarePressAt: CFAbsoluteTime = 0
     private let inputTraceEnabled = Foundation.ProcessInfo.processInfo.arguments.contains("--vvterm-input-trace")
         || Foundation.ProcessInfo.processInfo.environment["VVTERM_INPUT_TRACE"] == "1"
@@ -916,8 +917,8 @@ class GhosttyTerminalView: UIView {
         return nil
     }
 
-    private func handleCommandShortcut(_ key: UIKey) -> Bool {
-        guard key.modifierFlags.contains(.command) else { return false }
+    private func handleCommandShortcut(_ key: UIKey, modifiers: UIKeyModifierFlags) -> Bool {
+        guard modifiers.contains(.command) else { return false }
         let input = key.charactersIgnoringModifiers.lowercased()
         switch input {
         case "v":
@@ -1037,14 +1038,14 @@ class GhosttyTerminalView: UIView {
         return nil
     }
 
-    private func startKeyRepeat(for key: UIKey) {
+    private func startKeyRepeat(for key: UIKey, modifiers: UIKeyModifierFlags) {
         guard shouldRepeatHardwareKey(key) else { return }
         let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
-        guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return }
+        guard modifiers.intersection(blockedModifiers).isEmpty else { return }
         stopKeyRepeat()
         repeatingHardwareKey = key
         repeatingFallbackKey = fallbackHardwareKey(for: key)
-        repeatingFallbackModifiers = key.modifierFlags
+        repeatingFallbackModifiers = modifiers
         repeatingKeyCode = UInt16(key.keyCode.rawValue)
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.35, repeating: 0.05)
@@ -1054,6 +1055,7 @@ class GhosttyTerminalView: UIView {
             if let repeatKey = self.repeatingHardwareKey,
                self.sendDirectHardwareKeyEvent(
                    repeatKey,
+                   modifiers: self.repeatingFallbackModifiers,
                    action: GHOSTTY_ACTION_REPEAT,
                    surface: cSurface
                ) {
@@ -1124,24 +1126,31 @@ class GhosttyTerminalView: UIView {
 
     private func sendDirectHardwareKeyEvent(
         _ key: UIKey,
+        modifiers: UIKeyModifierFlags,
         action: ghostty_input_action_e,
         surface cSurface: ghostty_surface_t
     ) -> Bool {
+        let descriptor = Ghostty.Input.HardwareKeyDescriptor(
+            keyCode: key.keyCode,
+            modifierFlags: modifiers,
+            characters: key.characters,
+            charactersIgnoringModifiers: key.charactersIgnoringModifiers
+        )
         let dispatched = Ghostty.Input.KeyEvent.dispatchHardwareKey(
-            .init(uiKey: key),
+            descriptor,
             action: ghosttyInputAction(action)
         ) { cEvent in
             ghostty_surface_key(cSurface, cEvent)
         }
         traceInput(
-            "sendDirectHardwareKeyEvent action=\(action.rawValue) keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' mods=\(key.modifierFlags.rawValue) dispatched=\(dispatched)"
+            "sendDirectHardwareKeyEvent action=\(action.rawValue) keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' reportedMods=\(key.modifierFlags.rawValue) effectiveMods=\(modifiers.rawValue) dispatched=\(dispatched)"
         )
         return dispatched
     }
 
-    private func shouldRoutePressToSystemTextInput(_ key: UIKey) -> Bool {
+    private func shouldRoutePressToSystemTextInput(_ key: UIKey, modifiers: UIKeyModifierFlags) -> Bool {
         let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
-        guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return false }
+        guard modifiers.intersection(blockedModifiers).isEmpty else { return false }
         if hasActiveIMEComposition { return true }
         if fallbackHardwareKey(for: key) != nil { return false }
         // Route only keys that can't be represented directly. Most hardware keys
@@ -1149,10 +1158,10 @@ class GhosttyTerminalView: UIView {
         return key.characters.isEmpty && key.charactersIgnoringModifiers.isEmpty
     }
 
-    private func queueHardwareInsertTextSuppressionIfNeeded(for key: UIKey) {
+    private func queueHardwareInsertTextSuppressionIfNeeded(for key: UIKey, modifiers: UIKeyModifierFlags) {
         guard !hasActiveIMEComposition else { return }
         let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
-        guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return }
+        guard modifiers.intersection(blockedModifiers).isEmpty else { return }
         let text = key.characters.precomposedStringWithCanonicalMapping
         guard !text.isEmpty, !text.hasPrefix("UIKeyInput") else { return }
         hardwareInsertTextSuppression.queue(text)
@@ -1173,22 +1182,33 @@ class GhosttyTerminalView: UIView {
                 forwardedToSystem.insert(press)
                 continue
             }
+            let keyCode = UInt16(key.keyCode.rawValue)
+            hardwareModifierState.handlePressBegan(keyCode: keyCode)
+            var effectiveModifiers = hardwareModifierState.effectiveModifiers(reported: key.modifierFlags)
+            if effectiveModifiers.intersection([.control, .alternate]).isEmpty,
+               let toolbarModifiers = keyboardToolbar?.consumeModifierFlags(),
+               !toolbarModifiers.isEmpty {
+                effectiveModifiers.formUnion(toolbarModifiers)
+                traceInput(
+                    "pressesBegan mergedToolbarModifiers keyCode=\(key.keyCode.rawValue) toolbarMods=\(toolbarModifiers.rawValue)"
+                )
+            }
             traceInput(
-                "pressesBegan keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' mods=\(key.modifierFlags.rawValue)"
+                "pressesBegan keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' reportedMods=\(key.modifierFlags.rawValue) effectiveMods=\(effectiveModifiers.rawValue)"
             )
             markHardwareKeyboardDetectedFromKeyPress()
-            if handleCommandShortcut(key) { continue }
-            let routeToSystemTextInput = shouldRoutePressToSystemTextInput(key)
+            if handleCommandShortcut(key, modifiers: effectiveModifiers) { continue }
+            let routeToSystemTextInput = shouldRoutePressToSystemTextInput(key, modifiers: effectiveModifiers)
             if routeToSystemTextInput {
-                systemTextInputPresses.insert(UInt16(key.keyCode.rawValue))
+                systemTextInputPresses.insert(keyCode)
                 forwardedToSystem.insert(press)
                 traceInput("pressesBegan routeToSystemTextInput keyCode=\(key.keyCode.rawValue)")
                 continue
             }
 
-            let keyCode = UInt16(key.keyCode.rawValue)
             let directDispatched = sendDirectHardwareKeyEvent(
                 key,
+                modifiers: effectiveModifiers,
                 action: GHOSTTY_ACTION_PRESS,
                 surface: cSurface
             )
@@ -1197,25 +1217,24 @@ class GhosttyTerminalView: UIView {
                 fallbackHardwarePressKeys.removeValue(forKey: keyCode)
                 fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
                 lastGhosttyHardwarePressAt = CFAbsoluteTimeGetCurrent()
-                queueHardwareInsertTextSuppressionIfNeeded(for: key)
-                startKeyRepeat(for: key)
+                queueHardwareInsertTextSuppressionIfNeeded(for: key, modifiers: effectiveModifiers)
+                startKeyRepeat(for: key, modifiers: effectiveModifiers)
                 didHandleGhosttyInput = true
                 traceInput("pressesBegan directDispatched keyCode=\(key.keyCode.rawValue)")
             } else if let fallbackKey = fallbackHardwareKey(for: key) {
-                let keyCode = UInt16(key.keyCode.rawValue)
                 surface.sendKeyEvent(
                     fallbackHardwareEvent(
                         key: fallbackKey,
                         action: .press,
-                        modifiers: key.modifierFlags
+                        modifiers: effectiveModifiers
                     )
                 )
                 hardwarePressesSentToGhostty.insert(keyCode)
                 fallbackHardwarePressKeys[keyCode] = fallbackKey
-                fallbackHardwarePressModifiers[keyCode] = key.modifierFlags
+                fallbackHardwarePressModifiers[keyCode] = effectiveModifiers
                 lastGhosttyHardwarePressAt = CFAbsoluteTimeGetCurrent()
-                queueHardwareInsertTextSuppressionIfNeeded(for: key)
-                startKeyRepeat(for: key)
+                queueHardwareInsertTextSuppressionIfNeeded(for: key, modifiers: effectiveModifiers)
+                startKeyRepeat(for: key, modifiers: effectiveModifiers)
                 didHandleGhosttyInput = true
                 traceInput("pressesBegan fallbackDispatched keyCode=\(key.keyCode.rawValue)")
             } else {
@@ -1246,14 +1265,16 @@ class GhosttyTerminalView: UIView {
                 forwardedToSystem.insert(press)
                 continue
             }
-            traceInput(
-                "pressesEnded keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' mods=\(key.modifierFlags.rawValue)"
-            )
             let keyCode = UInt16(key.keyCode.rawValue)
+            let effectiveModifiers = hardwareModifierState.effectiveModifiers(reported: key.modifierFlags)
+            traceInput(
+                "pressesEnded keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' reportedMods=\(key.modifierFlags.rawValue) effectiveMods=\(effectiveModifiers.rawValue)"
+            )
             guard hardwarePressesSentToGhostty.contains(keyCode) else {
                 fallbackHardwarePressKeys.removeValue(forKey: keyCode)
                 fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
                 systemTextInputPresses.remove(keyCode)
+                hardwareModifierState.handlePressEnded(keyCode: keyCode)
                 forwardedToSystem.insert(press)
                 traceInput("pressesEnded forwardedToSystem keyCode=\(key.keyCode.rawValue)")
                 continue
@@ -1264,9 +1285,14 @@ class GhosttyTerminalView: UIView {
             }
             let fallbackKey = fallbackHardwarePressKeys.removeValue(forKey: keyCode)
             let fallbackModifiers =
-                fallbackHardwarePressModifiers.removeValue(forKey: keyCode) ?? key.modifierFlags
+                fallbackHardwarePressModifiers.removeValue(forKey: keyCode) ?? effectiveModifiers
 
-            if sendDirectHardwareKeyEvent(key, action: GHOSTTY_ACTION_RELEASE, surface: cSurface) {
+            if sendDirectHardwareKeyEvent(
+                key,
+                modifiers: effectiveModifiers,
+                action: GHOSTTY_ACTION_RELEASE,
+                surface: cSurface
+            ) {
                 didHandleGhosttyInput = true
                 traceInput("pressesEnded directDispatched keyCode=\(key.keyCode.rawValue)")
             } else if let fallbackKey {
@@ -1280,6 +1306,7 @@ class GhosttyTerminalView: UIView {
                 didHandleGhosttyInput = true
                 traceInput("pressesEnded fallbackDispatched keyCode=\(key.keyCode.rawValue)")
             }
+            hardwareModifierState.handlePressEnded(keyCode: keyCode)
         }
 
         if !forwardedToSystem.isEmpty {
@@ -1300,7 +1327,9 @@ class GhosttyTerminalView: UIView {
             fallbackHardwarePressKeys.removeValue(forKey: keyCode)
             fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
             systemTextInputPresses.remove(keyCode)
+            hardwareModifierState.handlePressEnded(keyCode: keyCode)
         }
+        hardwareModifierState.reset()
         stopKeyRepeat()
     }
 
@@ -2479,6 +2508,18 @@ private class TerminalInputAccessoryView: UIInputView {
             updateModifierState()
         }
         return (ctrl, alt, shift)
+    }
+
+    func consumeModifierFlags() -> UIKeyModifierFlags {
+        let consumed = consumeModifiers()
+        var flags: UIKeyModifierFlags = []
+        if consumed.ctrl {
+            flags.insert(.control)
+        }
+        if consumed.alt {
+            flags.insert(.alternate)
+        }
+        return flags
     }
 
     private func updateModifierState() {

@@ -188,6 +188,15 @@ struct SSHShellRegistry {
 @MainActor
 final class ConnectionSessionManager: ObservableObject {
     static let shared = ConnectionSessionManager()
+    private static let isHarnessMode: Bool = {
+        let processInfo = Foundation.ProcessInfo.processInfo
+        let arguments = Set(processInfo.arguments)
+        let environment = processInfo.environment
+        return arguments.contains("--vvterm-input-harness")
+            || arguments.contains("--vvterm-ssh-harness")
+            || environment["VVTERM_INPUT_HARNESS"] == "1"
+            || environment["VVTERM_SSH_HARNESS"] == "1"
+    }()
 
     @Published var sessions: [ConnectionSession] = [] {
         didSet {
@@ -293,7 +302,7 @@ final class ConnectionSessionManager: ObservableObject {
     ///   - forceNew: If true, always creates a new tab even if one exists for this server
     func openConnection(to server: Server, forceNew: Bool = false) async throws -> ConnectionSession {
         // Check if server is locked due to downgrade
-        if ServerManager.shared.isServerLocked(server) {
+        if !Self.isHarnessMode, ServerManager.shared.isServerLocked(server) {
             throw VVTermError.serverLocked(server.name)
         }
 
@@ -305,8 +314,10 @@ final class ConnectionSessionManager: ObservableObject {
         sessionOpensInFlight.insert(server.id)
         defer { sessionOpensInFlight.remove(server.id) }
 
-        guard await AppLockManager.shared.ensureServerUnlocked(server) else {
-            throw VVTermError.authenticationFailed
+        if !Self.isHarnessMode {
+            guard await AppLockManager.shared.ensureServerUnlocked(server) else {
+                throw VVTermError.authenticationFailed
+            }
         }
 
         // Check if already have a session for this server (unless forcing new)

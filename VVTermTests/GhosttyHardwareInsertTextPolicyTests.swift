@@ -3,6 +3,8 @@ import Testing
 @testable import VVTerm
 
 #if os(iOS)
+import UIKit
+
 struct GhosttyHardwareInsertTextPolicyTests {
     @Test
     func suppressesSinglePrintableInsertTextAfterRecentHardwarePress() {
@@ -75,6 +77,28 @@ struct GhosttyHardwareInsertTextPolicyTests {
         )
 
         #expect(suppressed)
+    }
+}
+
+struct HardwareModifierStateTests {
+    @Test
+    func keepsControlActiveAcrossSeparateModifierAndCharacterPresses() {
+        var state = HardwareModifierState()
+        state.handlePressBegan(keyCode: UInt16(UIKeyboardHIDUsage.keyboardLeftControl.rawValue))
+
+        let effective = state.effectiveModifiers(reported: [])
+        #expect(effective.contains(.control))
+
+        state.handlePressEnded(keyCode: UInt16(UIKeyboardHIDUsage.keyboardLeftControl.rawValue))
+        let afterRelease = state.effectiveModifiers(reported: [])
+        #expect(!afterRelease.contains(.control))
+    }
+
+    @Test
+    func preservesReportedModifiersWhenNoTrackedStateExists() {
+        let state = HardwareModifierState()
+        let effective = state.effectiveModifiers(reported: [.command])
+        #expect(effective.contains(.command))
     }
 }
 #endif

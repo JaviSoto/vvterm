@@ -79,8 +79,13 @@ struct VVTermApp: App {
             || processEnvironment["VVTERM_INPUT_HARNESS"] == "1"
     }
 
+    private var isSSHHarnessMode: Bool {
+        processArguments.contains("--vvterm-ssh-harness")
+            || processEnvironment["VVTERM_SSH_HARNESS"] == "1"
+    }
+
     private var shouldPresentWelcome: Bool {
-        !hasSeenWelcome && !isInputHarnessMode
+        !hasSeenWelcome && !isInputHarnessMode && !isSSHHarnessMode
     }
 
     var body: some Scene {
@@ -92,6 +97,8 @@ struct VVTermApp: App {
                     Group {
                         if isInputHarnessMode {
                             InputHarnessView()
+                        } else if isSSHHarnessMode {
+                            SSHHarnessView()
                         } else {
                             iOSContentView()
                         }
@@ -368,6 +375,133 @@ private struct InputHarnessView: View {
     }
 }
 
+private struct SSHHarnessView: View {
+    @EnvironmentObject private var ghosttyApp: Ghostty.App
+    @State private var session: ConnectionSession?
+    @State private var statusMessage = "Preparing SSH harness..."
+    @State private var didAttemptConnect = false
+
+    private let harnessServer: Server
+    private let harnessCredentials: ServerCredentials
+
+    init() {
+        let env = Foundation.ProcessInfo.processInfo.environment
+        let host = env["VVTERM_SSH_HARNESS_HOST"] ?? "127.0.0.1"
+        let username = env["VVTERM_SSH_HARNESS_USERNAME"] ?? "javi"
+        let port = Int(env["VVTERM_SSH_HARNESS_PORT"] ?? "") ?? 22
+        let name = env["VVTERM_SSH_HARNESS_NAME"] ?? "SSH Harness"
+
+        let privateKeyData: Data? = {
+            if let b64 = env["VVTERM_SSH_HARNESS_PRIVATE_KEY_BASE64"],
+               let decoded = Data(base64Encoded: b64) {
+                return decoded
+            }
+            if let key = env["VVTERM_SSH_HARNESS_PRIVATE_KEY"] {
+                return key.data(using: .utf8)
+            }
+            return nil
+        }()
+
+        let authMethod: AuthMethod = privateKeyData == nil ? .password : .sshKey
+        let serverId = UUID()
+        harnessServer = Server(
+            id: serverId,
+            workspaceId: UUID(),
+            environment: .production,
+            name: name,
+            host: host,
+            port: port,
+            username: username,
+            connectionMode: .standard,
+            authMethod: authMethod,
+            tags: ["harness"],
+            notes: "SSH harness session"
+        )
+        harnessCredentials = ServerCredentials(
+            serverId: serverId,
+            password: env["VVTERM_SSH_HARNESS_PASSWORD"],
+            privateKey: privateKeyData,
+            publicKey: nil,
+            passphrase: env["VVTERM_SSH_HARNESS_PASSPHRASE"]
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 6) {
+                Text("VVTerm SSH Harness")
+                    .font(.headline)
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+            }
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+
+            if let session {
+                SSHTerminalWrapper(
+                    session: session,
+                    server: harnessServer,
+                    credentials: harnessCredentials,
+                    isActive: true,
+                    onProcessExit: {
+                        statusMessage = "SSH harness process exited."
+                    },
+                    onReady: {
+                        statusMessage = "Connected. Start zellij, then send Ctrl+T and N."
+                    }
+                )
+                .environmentObject(ghosttyApp)
+            } else {
+                VStack(spacing: 12) {
+                    Spacer()
+                    ProgressView()
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                    Spacer()
+                }
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .task(id: harnessServer.id) {
+            await connectIfNeeded()
+        }
+        .onAppear {
+            ghosttyApp.startIfNeeded()
+        }
+        .onDisappear {
+            if let session {
+                ConnectionSessionManager.shared.closeSession(session)
+            }
+        }
+    }
+
+    @MainActor
+    private func connectIfNeeded() async {
+        guard !didAttemptConnect else { return }
+        didAttemptConnect = true
+
+        if harnessCredentials.password == nil && harnessCredentials.privateKey == nil {
+            statusMessage = "Missing SSH harness credentials. Provide password or private key env vars."
+            return
+        }
+
+        statusMessage = "Opening SSH session to \(harnessServer.displayAddress)..."
+        do {
+            session = try await ConnectionSessionManager.shared.openConnection(to: harnessServer, forceNew: true)
+            statusMessage = "SSH session started. Waiting for terminal ready..."
+        } catch {
+            statusMessage = "SSH harness connect failed: \(error.localizedDescription)"
+        }
+    }
+}
+
 private struct InputHarnessTerminalHost: UIViewRepresentable {
     @EnvironmentObject private var ghosttyApp: Ghostty.App
     let onWriteSummary: (String) -> Void
@@ -424,6 +558,7 @@ private struct InputHarnessTerminalHost: UIViewRepresentable {
 
         func attach(to terminalView: GhosttyTerminalView) {
             self.terminalView = terminalView
+            terminalView.setupWriteCallback()
             terminalView.writeCallback = { [weak self] data in
                 self?.handleTerminalWrite(data)
             }

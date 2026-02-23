@@ -100,14 +100,15 @@ cat >> {shlex.quote(str(pane_input_path))}
     write_text(sink_script_path, sink_script)
     sink_script_path.chmod(0o755)
 
-    # Keep keybinds minimal so the harness exercises only Ctrl+T -> tab mode, then n.
+    # Keep keybinds minimal while matching real zellij tab-mode behavior:
+    # Ctrl+T enters tab mode, then n opens a new tab.
     zellij_config = """keybinds clear-defaults=true {
     normal {
         bind "Ctrl t" { SwitchToMode "tab"; }
     }
     tab {
         bind "Ctrl t" { SwitchToMode "normal"; }
-        bind "n" { SwitchToMode "normal"; }
+        bind "n" { NewTab; SwitchToMode "normal"; }
     }
 }
 """

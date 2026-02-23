@@ -10,9 +10,11 @@ DERIVED_DATA="${DERIVED_DATA:-/Volumes/RunnerCache/DerivedData/javi}"
 ZELLIJ_BIN="${ZELLIJ_BIN:-/opt/homebrew/bin/zellij}"
 ZELLIJ_PROXY_SCRIPT="${ZELLIJ_PROXY_SCRIPT:-$PWD/scripts/zellij_harness_proxy.py}"
 KEY_SEQUENCE_REPETITIONS="${KEY_SEQUENCE_REPETITIONS:-1}"
+CTRL_SEQUENCE_METHOD="${CTRL_SEQUENCE_METHOD:-hardware}"
 FOLLOWUP_INPUT_METHOD="${FOLLOWUP_INPUT_METHOD:-key}"
 FOLLOWUP_TEXT="${FOLLOWUP_TEXT:-n}"
 CTRL_T_TO_FOLLOWUP_DELAY="${CTRL_T_TO_FOLLOWUP_DELAY:-0.2}"
+VERIFY_NEW_TAB="${VERIFY_NEW_TAB:-1}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_DIR="${LOG_DIR:-$PWD/build/input-trace-$STAMP}"
 
@@ -145,7 +147,25 @@ xcrun simctl io "$UDID" screenshot "$LOG_DIR/pre-keys.png" >/dev/null 2>&1 || tr
 axe tap -x 200 -y 450 --udid "$UDID" || true
 sleep 0.4
 for _ in $(seq 1 "$KEY_SEQUENCE_REPETITIONS"); do
-  axe key-combo --modifiers 224 --key 23 --udid "$UDID"  # Ctrl+T
+  case "$CTRL_SEQUENCE_METHOD" in
+    hardware)
+      axe key-combo --modifiers 224 --key 23 --udid "$UDID"  # Ctrl+T
+      ;;
+    softkey)
+      axe tap --label "Ctrl" --udid "$UDID"
+      sleep 0.1
+      axe tap --label "t" --udid "$UDID"
+      ;;
+    softkey_type)
+      axe tap --label "Ctrl" --udid "$UDID"
+      sleep 0.1
+      axe type "t" --udid "$UDID"
+      ;;
+    *)
+      echo "Unsupported CTRL_SEQUENCE_METHOD='$CTRL_SEQUENCE_METHOD' (expected 'hardware', 'softkey', or 'softkey_type')" >&2
+      exit 1
+      ;;
+  esac
   sleep "$CTRL_T_TO_FOLLOWUP_DELAY"
   case "$FOLLOWUP_INPUT_METHOD" in
     key)
@@ -154,14 +174,18 @@ for _ in $(seq 1 "$KEY_SEQUENCE_REPETITIONS"); do
     type)
       axe type "$FOLLOWUP_TEXT" --udid "$UDID"
       ;;
+    tap)
+      axe tap --label "$FOLLOWUP_TEXT" --udid "$UDID"
+      ;;
     *)
-      echo "Unsupported FOLLOWUP_INPUT_METHOD='$FOLLOWUP_INPUT_METHOD' (expected 'key' or 'type')" >&2
+      echo "Unsupported FOLLOWUP_INPUT_METHOD='$FOLLOWUP_INPUT_METHOD' (expected 'key', 'type', or 'tap')" >&2
       exit 1
       ;;
   esac
   sleep 0.3
 done
 sleep 0.8
+xcrun simctl io "$UDID" screenshot "$LOG_DIR/post-keys.png" >/dev/null 2>&1 || true
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 
@@ -214,6 +238,24 @@ then
   exit 4
 fi
 
+SESSION_NAME="$(python3 - "$SUMMARY_FILE" <<'PY'
+import json
+import sys
+summary = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+print(summary.get("session_name", ""))
+PY
+)"
+if [[ -z "$SESSION_NAME" ]]; then
+  echo "FAIL: harness summary did not include a zellij session name."
+  exit 5
+fi
+
+TAB_NAMES_FILE="$LOG_DIR/tab-names.txt"
+"$ZELLIJ_BIN" --session "$SESSION_NAME" action query-tab-names >"$TAB_NAMES_FILE" 2>&1 || true
+echo
+echo "Tab names after key sequence:"
+cat "$TAB_NAMES_FILE"
+
 PANE_INPUT_FILE="$LOG_DIR/pane-input.bin"
 if [[ -s "$PANE_INPUT_FILE" ]]; then
   echo
@@ -223,8 +265,16 @@ if [[ -s "$PANE_INPUT_FILE" ]]; then
   exit 2
 fi
 
+if [[ "$VERIFY_NEW_TAB" == "1" ]]; then
+  if ! grep -q "Tab #2" "$TAB_NAMES_FILE"; then
+    echo
+    echo "FAIL: Ctrl+T then N did not create a new zellij tab."
+    exit 6
+  fi
+fi
+
 echo
-echo "PASS: no pane input leaked after Ctrl+T then N."
+echo "PASS: Ctrl+T then N created a new zellij tab with no pane-input leak."
 
 echo
 echo "Artifacts:"

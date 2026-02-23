@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import UIKit
 
 struct HardwareInsertTextSuppressionState {
     private struct PendingInsertText {
@@ -37,6 +38,44 @@ struct HardwareInsertTextSuppressionState {
 
     private mutating func prune(now: CFAbsoluteTime) {
         pending.removeAll { now - $0.enqueuedAt > ttlSeconds }
+    }
+}
+
+struct HardwareModifierState {
+    private(set) var activeModifiers: UIKeyModifierFlags = []
+
+    mutating func handlePressBegan(keyCode: UInt16) {
+        guard let flag = modifierFlag(for: keyCode) else { return }
+        activeModifiers.insert(flag)
+    }
+
+    mutating func handlePressEnded(keyCode: UInt16) {
+        guard let flag = modifierFlag(for: keyCode) else { return }
+        activeModifiers.remove(flag)
+    }
+
+    mutating func reset() {
+        activeModifiers = []
+    }
+
+    func effectiveModifiers(reported: UIKeyModifierFlags) -> UIKeyModifierFlags {
+        activeModifiers.union(reported)
+    }
+
+    private func modifierFlag(for keyCode: UInt16) -> UIKeyModifierFlags? {
+        guard let usage = UIKeyboardHIDUsage(rawValue: Int(keyCode)) else { return nil }
+        switch usage {
+        case .keyboardLeftControl, .keyboardRightControl:
+            return .control
+        case .keyboardLeftAlt, .keyboardRightAlt:
+            return .alternate
+        case .keyboardLeftShift, .keyboardRightShift:
+            return .shift
+        case .keyboardLeftGUI, .keyboardRightGUI:
+            return .command
+        default:
+            return nil
+        }
     }
 }
 
