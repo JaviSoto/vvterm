@@ -8,6 +8,47 @@ import Foundation
 
 /// Parses terminal theme files to extract colors
 struct ThemeColorParser {
+    struct ThemePreviewValues {
+        static let defaultPaletteHex = [
+            "#1D1F21", "#CC6666", "#B5BD68", "#F0C674",
+            "#81A2BE", "#B294BB", "#8ABEB7", "#C5C8C6",
+            "#666666", "#D54E53", "#B9CA4A", "#E7C547",
+            "#7AA6DA", "#C397D8", "#70C0B1", "#EAEAEA"
+        ]
+
+        static let `default` = ThemePreviewValues(
+            backgroundHex: "#101418",
+            foregroundHex: "#D8E0EA",
+            cursorColorHex: "#F8B26A",
+            cursorTextHex: "#101418",
+            selectionBackgroundHex: "#2E3A46",
+            selectionForegroundHex: "#D8E0EA",
+            paletteHex: defaultPaletteHex
+        )
+
+        var backgroundHex: String
+        var foregroundHex: String
+        var cursorColorHex: String
+        var cursorTextHex: String
+        var selectionBackgroundHex: String
+        var selectionForegroundHex: String
+        var paletteHex: [String]
+
+        var backgroundColor: Color { Color.fromHex(backgroundHex) }
+        var foregroundColor: Color { Color.fromHex(foregroundHex) }
+        var cursorColor: Color { Color.fromHex(cursorColorHex) }
+        var cursorTextColor: Color { Color.fromHex(cursorTextHex) }
+        var selectionBackgroundColor: Color { Color.fromHex(selectionBackgroundHex) }
+        var selectionForegroundColor: Color { Color.fromHex(selectionForegroundHex) }
+
+        func paletteColor(at index: Int) -> Color {
+            guard paletteHex.indices.contains(index) else {
+                return Color.fromHex(Self.defaultPaletteHex[0])
+            }
+            return Color.fromHex(paletteHex[index])
+        }
+    }
+
     /// Extracts background color from a Ghostty theme file
     /// - Parameter themeName: The name of the theme (e.g., "Aizen Dark")
     /// - Returns: The background Color if found, nil otherwise
@@ -63,6 +104,66 @@ struct ThemeColorParser {
         let fg = normalizeHex(selectionForeground ?? foreground ?? fallbackForegroundHex)
         let bg = normalizeHex(selectionBackground ?? fallbackSelectionBackgroundHex)
         return "fg=#\(fg),bg=#\(bg)"
+    }
+
+    nonisolated static func previewValues(for themeName: String) -> ThemePreviewValues {
+        guard let content = themeContent(for: themeName) else {
+            return .default
+        }
+        return previewValues(fromThemeContent: content)
+    }
+
+    nonisolated static func previewValues(fromThemeContent content: String) -> ThemePreviewValues {
+        var preview = ThemePreviewValues.default
+
+        for rawLine in content.components(separatedBy: .newlines) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+
+            let parts = trimmed.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+
+            let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if key == "palette" {
+                let paletteParts = value.split(separator: "=", maxSplits: 1)
+                guard
+                    paletteParts.count == 2,
+                    let paletteIndex = Int(paletteParts[0].trimmingCharacters(in: .whitespacesAndNewlines)),
+                    (0..<16).contains(paletteIndex),
+                    let paletteColor = TerminalThemeValidator.normalizeHexColor(String(paletteParts[1]))
+                else {
+                    continue
+                }
+                preview.paletteHex[paletteIndex] = paletteColor
+                continue
+            }
+
+            guard let normalized = TerminalThemeValidator.normalizeHexColor(value) else { continue }
+
+            switch key {
+            case "background":
+                preview.backgroundHex = normalized
+                if TerminalThemeValidator.normalizeHexColor(preview.cursorTextHex) == TerminalThemeValidator.normalizeHexColor(ThemePreviewValues.default.cursorTextHex) {
+                    preview.cursorTextHex = normalized
+                }
+            case "foreground":
+                preview.foregroundHex = normalized
+            case "cursor-color":
+                preview.cursorColorHex = normalized
+            case "cursor-text":
+                preview.cursorTextHex = normalized
+            case "selection-background":
+                preview.selectionBackgroundHex = normalized
+            case "selection-foreground":
+                preview.selectionForegroundHex = normalized
+            default:
+                continue
+            }
+        }
+
+        return preview
     }
 
     private nonisolated static func themeContent(for themeName: String) -> String? {
