@@ -711,7 +711,7 @@ final class CloudKitManager: ObservableObject {
 
     private func fetchQueryRecords(recordType: String, zoneID: CKRecordZone.ID) async throws -> [CKRecord] {
         let database = try requireDatabase()
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord], Error>) in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord], Error>) in
             var records: [CKRecord] = []
 
             func runQuery(cursor: CKQueryOperation.Cursor?) {
