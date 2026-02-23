@@ -66,6 +66,10 @@ final class CloudKitManager: ObservableObject {
     private var zoneReady = false
 
     private static func resolveCloudKitContainerID() -> String? {
+        #if os(iOS) || os(tvOS) || os(watchOS)
+        // Ad-hoc iOS builds frequently ship without CloudKit entitlements.
+        return nil
+        #else
         let entitlementKey = "com.apple.developer.icloud-container-identifiers" as CFString
         guard let task = SecTaskCreateFromSelf(nil),
               let entitlement = SecTaskCopyValueForEntitlement(task, entitlementKey, nil) else {
@@ -79,6 +83,7 @@ final class CloudKitManager: ObservableObject {
             return containerID
         }
         return nil
+        #endif
     }
 
     private init() {
