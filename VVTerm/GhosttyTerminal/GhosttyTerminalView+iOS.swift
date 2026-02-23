@@ -144,6 +144,7 @@ class GhosttyTerminalView: UIView {
     private var fallbackHardwarePressKeys: [UInt16: Ghostty.Input.Key] = [:]
     private var fallbackHardwarePressModifiers: [UInt16: UIKeyModifierFlags] = [:]
     private var systemTextInputPresses: Set<UInt16> = []
+    private var hardwareInsertTextSuppression = HardwareInsertTextSuppressionState()
 
     // MARK: - Rendering Components
 
@@ -1130,6 +1131,16 @@ class GhosttyTerminalView: UIView {
         return key.characters.isEmpty && key.charactersIgnoringModifiers.isEmpty
     }
 
+    private func queueHardwareInsertTextSuppressionIfNeeded(for key: UIKey) {
+        guard hasHardwareKeyboardAttached else { return }
+        guard !hasActiveIMEComposition else { return }
+        let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
+        guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return }
+        let text = key.characters.precomposedStringWithCanonicalMapping
+        guard !text.isEmpty, !text.hasPrefix("UIKeyInput") else { return }
+        hardwareInsertTextSuppression.queue(text)
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         guard let surface = surface, let cSurface = surface.unsafeCValue else {
             super.pressesBegan(presses, with: event)
@@ -1157,6 +1168,7 @@ class GhosttyTerminalView: UIView {
                 hardwarePressesSentToGhostty.insert(keyCode)
                 fallbackHardwarePressKeys.removeValue(forKey: keyCode)
                 fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
+                queueHardwareInsertTextSuppressionIfNeeded(for: key)
                 startKeyRepeat(for: key)
                 didHandleGhosttyInput = true
             } else if let fallbackKey = fallbackHardwareKey(for: key) {
@@ -1171,6 +1183,7 @@ class GhosttyTerminalView: UIView {
                 hardwarePressesSentToGhostty.insert(keyCode)
                 fallbackHardwarePressKeys[keyCode] = fallbackKey
                 fallbackHardwarePressModifiers[keyCode] = key.modifierFlags
+                queueHardwareInsertTextSuppressionIfNeeded(for: key)
                 startKeyRepeat(for: key)
                 didHandleGhosttyInput = true
             }
@@ -2497,6 +2510,14 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
     func insertText(_ text: String) {
         let text = text.precomposedStringWithCanonicalMapping
         if text.hasPrefix("UIKeyInput") {
+            return
+        }
+        // Hardware key presses are sent via ghostty_surface_key; suppress duplicate
+        // insertText payloads that can leak printable text into TUIs (e.g. zellij modes).
+        if hasHardwareKeyboardAttached,
+           !hasActiveIMEComposition,
+           systemTextInputPresses.isEmpty,
+           hardwareInsertTextSuppression.shouldSuppress(text) {
             return
         }
         if hasActiveIMEComposition {
