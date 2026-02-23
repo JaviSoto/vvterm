@@ -148,6 +148,7 @@ class GhosttyTerminalView: UIView {
     private var hardwareInsertTextSuppression = HardwareInsertTextSuppressionState()
     private var lastGhosttyHardwarePressAt: CFAbsoluteTime = 0
     private let inputTraceEnabled = Foundation.ProcessInfo.processInfo.arguments.contains("--vvterm-input-trace")
+        || Foundation.ProcessInfo.processInfo.environment["VVTERM_INPUT_TRACE"] == "1"
 
     // MARK: - Rendering Components
 
@@ -242,7 +243,8 @@ class GhosttyTerminalView: UIView {
         setupConfigReloadObservation()
         registerColorSchemeObserver()
         setupHardwareKeyboardObservation()
-        traceInput("startup hasHardwareKeyboardAttached=\(hasHardwareKeyboardAttached)")
+        let startupArgs = Foundation.ProcessInfo.processInfo.arguments.joined(separator: " ")
+        traceInput("startup hasHardwareKeyboardAttached=\(hasHardwareKeyboardAttached) args='\(startupArgs)'")
     }
 
     required init?(coder: NSCoder) {
@@ -1148,7 +1150,6 @@ class GhosttyTerminalView: UIView {
     }
 
     private func queueHardwareInsertTextSuppressionIfNeeded(for key: UIKey) {
-        guard hasHardwareKeyboardAttached else { return }
         guard !hasActiveIMEComposition else { return }
         let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
         guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return }
@@ -2557,13 +2558,11 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
         let now = CFAbsoluteTimeGetCurrent()
         // Hardware key presses are sent via ghostty_surface_key; suppress duplicate
         // insertText payloads that can leak printable text into TUIs (e.g. zellij modes).
-        let suppressionQueued = hasHardwareKeyboardAttached
-            && !hasActiveIMEComposition
+        let suppressionQueued = !hasActiveIMEComposition
             && systemTextInputPresses.isEmpty
             && hardwareInsertTextSuppression.shouldSuppress(text, now: now)
         let suppressionFallback = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
             text: text,
-            hasHardwareKeyboardAttached: hasHardwareKeyboardAttached,
             hasActiveIMEComposition: hasActiveIMEComposition,
             systemTextInputPressesCount: systemTextInputPresses.count,
             now: now,

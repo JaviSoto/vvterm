@@ -8,7 +8,6 @@ struct GhosttyHardwareInsertTextPolicyTests {
     func suppressesSinglePrintableInsertTextAfterRecentHardwarePress() {
         let suppressed = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
             text: "n",
-            hasHardwareKeyboardAttached: true,
             hasActiveIMEComposition: false,
             systemTextInputPressesCount: 0,
             now: 10.2,
@@ -22,7 +21,6 @@ struct GhosttyHardwareInsertTextPolicyTests {
     func doesNotSuppressWhenHardwarePressIsStale() {
         let suppressed = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
             text: "n",
-            hasHardwareKeyboardAttached: true,
             hasActiveIMEComposition: false,
             systemTextInputPressesCount: 0,
             now: 11.0,
@@ -36,7 +34,6 @@ struct GhosttyHardwareInsertTextPolicyTests {
     func doesNotSuppressWhenSystemTextInputOwnsThePress() {
         let suppressed = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
             text: "n",
-            hasHardwareKeyboardAttached: true,
             hasActiveIMEComposition: false,
             systemTextInputPressesCount: 1,
             now: 10.2,
@@ -50,7 +47,6 @@ struct GhosttyHardwareInsertTextPolicyTests {
     func doesNotSuppressNonPrintableOrMultiCharacterText() {
         let controlSuppressed = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
             text: "\u{1}",
-            hasHardwareKeyboardAttached: true,
             hasActiveIMEComposition: false,
             systemTextInputPressesCount: 0,
             now: 10.2,
@@ -58,7 +54,6 @@ struct GhosttyHardwareInsertTextPolicyTests {
         )
         let multiSuppressed = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
             text: "ab",
-            hasHardwareKeyboardAttached: true,
             hasActiveIMEComposition: false,
             systemTextInputPressesCount: 0,
             now: 10.2,
@@ -67,6 +62,19 @@ struct GhosttyHardwareInsertTextPolicyTests {
 
         #expect(!controlSuppressed)
         #expect(!multiSuppressed)
+    }
+
+    @Test
+    func suppressesWithoutExplicitHardwareKeyboardFlag() {
+        let suppressed = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
+            text: "n",
+            hasActiveIMEComposition: false,
+            systemTextInputPressesCount: 0,
+            now: 10.2,
+            lastGhosttyHardwarePressAt: 10.0
+        )
+
+        #expect(suppressed)
     }
 }
 #endif

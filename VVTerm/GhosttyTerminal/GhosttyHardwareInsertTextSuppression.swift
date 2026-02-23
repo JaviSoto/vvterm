@@ -45,13 +45,11 @@ struct GhosttyHardwareInsertTextPolicy {
 
     static func shouldSuppressFallbackInsertText(
         text: String,
-        hasHardwareKeyboardAttached: Bool,
         hasActiveIMEComposition: Bool,
         systemTextInputPressesCount: Int,
         now: CFAbsoluteTime,
         lastGhosttyHardwarePressAt: CFAbsoluteTime
     ) -> Bool {
-        guard hasHardwareKeyboardAttached else { return false }
         guard !hasActiveIMEComposition else { return false }
         guard systemTextInputPressesCount == 0 else { return false }
         guard text.count == 1 else { return false }

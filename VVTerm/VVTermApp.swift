@@ -8,10 +8,20 @@ import SwiftUI
 import AppKit
 #endif
 import Foundation
+#if os(iOS)
+import Network
+#endif
 
 @main
 struct VVTermApp: App {
     init() {
+        if let currentHome = getenv("HOME"), !String(cString: currentHome).isEmpty {
+            // Keep existing HOME when provided by the host environment.
+        } else {
+            let sandboxHome = NSHomeDirectory()
+            let fallbackHome = sandboxHome.isEmpty ? "/tmp" : sandboxHome
+            setenv("HOME", fallbackHome, 1)
+        }
         TerminalDefaults.applyIfNeeded()
     }
 
@@ -36,6 +46,7 @@ struct VVTermApp: App {
     @AppStorage("appLanguage") private var appLanguage = AppLanguage.system.rawValue
     @AppStorage(PrivacyModeSettings.enabledKey) private var privacyModeEnabled = false
     private let processArguments = Foundation.ProcessInfo.processInfo.arguments
+    private let processEnvironment = Foundation.ProcessInfo.processInfo.environment
 
     // Terminal settings to watch for changes
     @AppStorage("terminalFontName") private var terminalFontName = "JetBrainsMono Nerd Font"
@@ -65,6 +76,7 @@ struct VVTermApp: App {
 
     private var isInputHarnessMode: Bool {
         processArguments.contains("--vvterm-input-harness")
+            || processEnvironment["VVTERM_INPUT_HARNESS"] == "1"
     }
 
     private var shouldPresentWelcome: Bool {
@@ -344,19 +356,10 @@ private struct InputHarnessView: View {
             .padding(.vertical, 10)
             .background(.ultraThinMaterial)
 
-            if ghosttyApp.readiness == .ready, ghosttyApp.app != nil {
-                InputHarnessTerminalHost { summary in
-                    lastWriteSummary = summary
-                }
-                .environmentObject(ghosttyApp)
-            } else {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Preparing terminal...")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            InputHarnessTerminalHost { summary in
+                lastWriteSummary = summary
             }
+            .environmentObject(ghosttyApp)
         }
         .background(Color(uiColor: .systemBackground))
         .onAppear {
@@ -369,36 +372,204 @@ private struct InputHarnessTerminalHost: UIViewRepresentable {
     @EnvironmentObject private var ghosttyApp: Ghostty.App
     let onWriteSummary: (String) -> Void
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onWriteSummary: onWriteSummary)
+    }
+
     func makeUIView(context: Context) -> UIView {
-        guard let app = ghosttyApp.app else {
-            return UIView(frame: .zero)
+        let container = UIView(frame: .zero)
+        container.backgroundColor = .clear
+        context.coordinator.installTerminalIfNeeded(in: container, ghosttyApp: ghosttyApp)
+        return container
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.installTerminalIfNeeded(in: uiView, ghosttyApp: ghosttyApp)
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class Coordinator {
+        private weak var terminalView: GhosttyTerminalView?
+        private let onWriteSummary: (String) -> Void
+        private let relayQueue = DispatchQueue(label: "vvterm.input-harness.relay")
+        private var relayConnection: NWConnection?
+        private var relayHost = "127.0.0.1"
+        private var relayPort: UInt16?
+
+        init(onWriteSummary: @escaping (String) -> Void) {
+            self.onWriteSummary = onWriteSummary
+            let args = Foundation.ProcessInfo.processInfo.arguments
+            if let host = Self.value(after: "--vvterm-input-harness-tcp-host", in: args), !host.isEmpty {
+                relayHost = host
+            }
+            let env = Foundation.ProcessInfo.processInfo.environment
+            if let envHost = env["VVTERM_INPUT_HARNESS_TCP_HOST"], !envHost.isEmpty {
+                relayHost = envHost
+            }
+            if let portString = Self.value(after: "--vvterm-input-harness-tcp-port", in: args),
+               let port = UInt16(portString),
+               port > 0 {
+                relayPort = port
+            }
+            if let envPort = env["VVTERM_INPUT_HARNESS_TCP_PORT"],
+               let port = UInt16(envPort),
+               port > 0 {
+                relayPort = port
+            }
+            Self.logLine("HarnessRelay init host=\(relayHost) port=\(relayPort.map(String.init) ?? "none")")
         }
 
-        let terminalView = GhosttyTerminalView(
-            frame: .zero,
-            worktreePath: NSHomeDirectory(),
-            ghosttyApp: app,
-            appWrapper: ghosttyApp,
-            paneId: "vvterm-input-harness",
-            command: nil,
-            useCustomIO: true
-        )
-        terminalView.writeCallback = { data in
+        func attach(to terminalView: GhosttyTerminalView) {
+            self.terminalView = terminalView
+            terminalView.writeCallback = { [weak self] data in
+                self?.handleTerminalWrite(data)
+            }
+            publish("HarnessRelay waiting for input")
+            startRelayIfConfigured()
+        }
+
+        func detach() {
+            relayQueue.sync {
+                relayConnection?.cancel()
+                relayConnection = nil
+            }
+            terminalView?.removeFromSuperview()
+            terminalView?.writeCallback = nil
+            terminalView = nil
+        }
+
+        func installTerminalIfNeeded(in container: UIView, ghosttyApp: Ghostty.App) {
+            guard terminalView == nil else { return }
+            ghosttyApp.startIfNeeded()
+            guard let app = ghosttyApp.app else {
+                publish("Preparing terminal (\(ghosttyApp.readiness.rawValue))...")
+                return
+            }
+
+            let terminalView = GhosttyTerminalView(
+                frame: container.bounds,
+                worktreePath: NSHomeDirectory(),
+                ghosttyApp: app,
+                appWrapper: ghosttyApp,
+                paneId: "vvterm-input-harness",
+                command: nil,
+                useCustomIO: true
+            )
+            terminalView.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(terminalView)
+            NSLayoutConstraint.activate([
+                terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                terminalView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                terminalView.topAnchor.constraint(equalTo: container.topAnchor),
+                terminalView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            attach(to: terminalView)
+        }
+
+        private func handleTerminalWrite(_ data: Data) {
+            let line = Self.renderWriteLine(data)
+            Self.logLine(line)
+            publish(line)
+            relayQueue.async { [weak self] in
+                guard let self = self else { return }
+                guard let relayConnection = self.relayConnection else { return }
+                relayConnection.send(content: data, completion: .contentProcessed { error in
+                    if let error {
+                        Self.logLine("HarnessRelay send error: \(error.localizedDescription)")
+                    }
+                })
+            }
+        }
+
+        private func startRelayIfConfigured() {
+            guard let relayPort else {
+                publish("HarnessRelay local trace mode")
+                return
+            }
+            guard let nwPort = NWEndpoint.Port(rawValue: relayPort) else {
+                publish("HarnessRelay invalid tcp port \(relayPort)")
+                return
+            }
+
+            let connection = NWConnection(host: NWEndpoint.Host(relayHost), port: nwPort, using: .tcp)
+            relayConnection = connection
+            publish("HarnessRelay connecting to \(relayHost):\(relayPort)")
+
+            connection.stateUpdateHandler = { [weak self] state in
+                guard let self = self else { return }
+                switch state {
+                case .ready:
+                    Self.logLine("HarnessRelay connected")
+                    self.publish("HarnessRelay connected")
+                    self.receiveLoop()
+                case .waiting(let error):
+                    Self.logLine("HarnessRelay waiting: \(error.localizedDescription)")
+                    self.publish("HarnessRelay waiting")
+                case .failed(let error):
+                    Self.logLine("HarnessRelay failed: \(error.localizedDescription)")
+                    self.publish("HarnessRelay failed")
+                case .cancelled:
+                    Self.logLine("HarnessRelay cancelled")
+                default:
+                    break
+                }
+            }
+
+            connection.start(queue: relayQueue)
+        }
+
+        private func receiveLoop() {
+            guard let relayConnection else { return }
+            relayConnection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+                guard let self = self else { return }
+                if let data, !data.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.terminalView?.feedData(data)
+                    }
+                }
+                if isComplete {
+                    Self.logLine("HarnessRelay peer closed")
+                    self.publish("HarnessRelay peer closed")
+                    return
+                }
+                if let error {
+                    Self.logLine("HarnessRelay receive error: \(error.localizedDescription)")
+                    self.publish("HarnessRelay receive error")
+                    return
+                }
+                self.receiveLoop()
+            }
+        }
+
+        private func publish(_ line: String) {
+            DispatchQueue.main.async { [onWriteSummary] in
+                onWriteSummary(line)
+            }
+        }
+
+        private static func value(after flag: String, in args: [String]) -> String? {
+            guard let flagIndex = args.firstIndex(of: flag) else { return nil }
+            let valueIndex = flagIndex + 1
+            guard valueIndex < args.count else { return nil }
+            return args[valueIndex]
+        }
+
+        private static func renderWriteLine(_ data: Data) -> String {
             let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
             let text = String(decoding: data, as: UTF8.self)
                 .replacingOccurrences(of: "\r", with: "\\r")
                 .replacingOccurrences(of: "\n", with: "\\n")
-            let line = "HarnessWrite bytes=\(hex) text='\(text)'"
+            return "HarnessWrite bytes=\(hex) text='\(text)'"
+        }
+
+        private static func logLine(_ line: String) {
             if let payload = "\(line)\n".data(using: .utf8) {
                 FileHandle.standardError.write(payload)
             }
-            Task { @MainActor in
-                onWriteSummary(line)
-            }
         }
-        return terminalView
     }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 #endif
