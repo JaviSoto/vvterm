@@ -2,6 +2,7 @@ import CloudKit
 import Foundation
 import Combine
 import os.log
+import Security
 
 // MARK: - CloudKit Manager
 
@@ -24,7 +25,8 @@ final class CloudKitManager: ObservableObject {
 
     private let container: CKContainer
     private let database: CKDatabase
-    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "CloudKit")
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "VVTerm", category: "CloudKit")
+    private let cloudKitConfigured: Bool
     private let recordZoneName = "VVTermZone"
     private lazy var recordZone = CKRecordZone(zoneName: recordZoneName)
     private var recordZoneID: CKRecordZone.ID { recordZone.zoneID }
@@ -58,15 +60,46 @@ final class CloudKitManager: ObservableObject {
     }
 
     private var accountStatusChecked = false
-    private var isSyncEnabled: Bool { SyncSettings.isEnabled }
+    private var isSyncEnabled: Bool { SyncSettings.isEnabled && cloudKitConfigured }
     private var fetchChangesTask: Task<CloudKitChanges, Error>?
     private var ensureZoneTask: Task<Void, Error>?
     private var zoneReady = false
 
+    private static func resolveCloudKitContainerID() -> String? {
+        let entitlementKey = "com.apple.developer.icloud-container-identifiers" as CFString
+        guard let task = SecTaskCreateFromSelf(nil),
+              let entitlement = SecTaskCopyValueForEntitlement(task, entitlementKey, nil) else {
+            return nil
+        }
+
+        if let containerIDs = entitlement as? [String], let first = containerIDs.first {
+            return first
+        }
+        if let containerID = entitlement as? String {
+            return containerID
+        }
+        return nil
+    }
+
     private init() {
-        container = CKContainer(identifier: "iCloud.app.vivy.VivyTerm")
+        if let containerID = Self.resolveCloudKitContainerID() {
+            cloudKitConfigured = true
+            container = CKContainer(identifier: containerID)
+        } else {
+            cloudKitConfigured = false
+            // Use default container as inert placeholder so CloudKit APIs are never hit
+            // in entitlement-less ad-hoc builds.
+            container = CKContainer.default()
+        }
         database = container.privateCloudDatabase
-        Task { await checkAccountStatus() }
+        if cloudKitConfigured {
+            Task { await checkAccountStatus() }
+        } else {
+            accountStatusDetail = String(localized: "Unavailable in this build")
+            applySyncDisabledState()
+            accountStatusChecked = true
+            logger.warning("CloudKit disabled: missing iCloud container entitlements")
+        }
     }
 
     // MARK: - Account Status
