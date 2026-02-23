@@ -7,6 +7,7 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #endif
+import Foundation
 
 @main
 struct VVTermApp: App {
@@ -34,6 +35,7 @@ struct VVTermApp: App {
     // App language
     @AppStorage("appLanguage") private var appLanguage = AppLanguage.system.rawValue
     @AppStorage(PrivacyModeSettings.enabledKey) private var privacyModeEnabled = false
+    private let processArguments = Foundation.ProcessInfo.processInfo.arguments
 
     // Terminal settings to watch for changes
     @AppStorage("terminalFontName") private var terminalFontName = "JetBrainsMono Nerd Font"
@@ -61,13 +63,27 @@ struct VVTermApp: App {
         return "\(darkVersion)"
     }
 
+    private var isInputHarnessMode: Bool {
+        processArguments.contains("--vvterm-input-harness")
+    }
+
+    private var shouldPresentWelcome: Bool {
+        !hasSeenWelcome && !isInputHarnessMode
+    }
+
     var body: some Scene {
         WindowGroup("", id: "main") {
             let appLocale = AppLanguage(rawValue: appLanguage)?.locale ?? Locale.current
             AppLockContainer {
                 Group {
                     #if os(iOS)
-                    iOSContentView()
+                    Group {
+                        if isInputHarnessMode {
+                            InputHarnessView()
+                        } else {
+                            iOSContentView()
+                        }
+                    }
                         .environmentObject(ghosttyApp)
                         .environmentObject(terminalThemeManager)
                         .environmentObject(terminalAccessoryPreferencesManager)
@@ -76,7 +92,7 @@ struct VVTermApp: App {
                             ghosttyApp.reloadConfig()
                         }
                         .sheet(isPresented: .init(
-                            get: { !hasSeenWelcome },
+                            get: { shouldPresentWelcome },
                             set: { if !$0 { hasSeenWelcome = true } }
                         )) {
                             WelcomeView(hasSeenWelcome: $hasSeenWelcome)
@@ -304,5 +320,85 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             AppLockManager.shared.lockIfNeededForBackground()
         }
     }
+}
+
+private struct InputHarnessView: View {
+    @EnvironmentObject private var ghosttyApp: Ghostty.App
+    @State private var lastWriteSummary = "Waiting for key input..."
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 6) {
+                Text("VVTerm Input Harness")
+                    .font(.headline)
+                Text("Use AXe to send Ctrl+T then N")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(lastWriteSummary)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+            }
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+
+            if ghosttyApp.readiness == .ready, ghosttyApp.app != nil {
+                InputHarnessTerminalHost { summary in
+                    lastWriteSummary = summary
+                }
+                .environmentObject(ghosttyApp)
+            } else {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Preparing terminal...")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .onAppear {
+            ghosttyApp.startIfNeeded()
+        }
+    }
+}
+
+private struct InputHarnessTerminalHost: UIViewRepresentable {
+    @EnvironmentObject private var ghosttyApp: Ghostty.App
+    let onWriteSummary: (String) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        guard let app = ghosttyApp.app else {
+            return UIView(frame: .zero)
+        }
+
+        let terminalView = GhosttyTerminalView(
+            frame: .zero,
+            worktreePath: NSHomeDirectory(),
+            ghosttyApp: app,
+            appWrapper: ghosttyApp,
+            paneId: "vvterm-input-harness",
+            command: nil,
+            useCustomIO: true
+        )
+        terminalView.writeCallback = { data in
+            let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+            let text = String(decoding: data, as: UTF8.self)
+                .replacingOccurrences(of: "\r", with: "\\r")
+                .replacingOccurrences(of: "\n", with: "\\n")
+            let line = "HarnessWrite bytes=\(hex) text='\(text)'"
+            if let payload = "\(line)\n".data(using: .utf8) {
+                FileHandle.standardError.write(payload)
+            }
+            Task { @MainActor in
+                onWriteSummary(line)
+            }
+        }
+        return terminalView
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 #endif

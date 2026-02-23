@@ -13,6 +13,7 @@ import SwiftUI
 import IOSurface
 import CoreImage
 import GameController
+import Foundation
 
 /// UIView that embeds a Ghostty terminal surface with Metal rendering
 ///
@@ -145,6 +146,8 @@ class GhosttyTerminalView: UIView {
     private var fallbackHardwarePressModifiers: [UInt16: UIKeyModifierFlags] = [:]
     private var systemTextInputPresses: Set<UInt16> = []
     private var hardwareInsertTextSuppression = HardwareInsertTextSuppressionState()
+    private var lastGhosttyHardwarePressAt: CFAbsoluteTime = 0
+    private let inputTraceEnabled = Foundation.ProcessInfo.processInfo.arguments.contains("--vvterm-input-trace")
 
     // MARK: - Rendering Components
 
@@ -175,6 +178,15 @@ class GhosttyTerminalView: UIView {
             ghostty_surface_refresh(surface)
             ghostty_surface_draw(surface)
             self.markIOSurfaceLayersForDisplay()
+        }
+    }
+
+    private func traceInput(_ message: String) {
+        guard inputTraceEnabled else { return }
+        let line = "InputTrace: \(message)"
+        Self.logger.info("\(line, privacy: .public)")
+        if let data = "\(line)\n".data(using: .utf8) {
+            FileHandle.standardError.write(data)
         }
     }
 
@@ -230,6 +242,7 @@ class GhosttyTerminalView: UIView {
         setupConfigReloadObservation()
         registerColorSchemeObserver()
         setupHardwareKeyboardObservation()
+        traceInput("startup hasHardwareKeyboardAttached=\(hasHardwareKeyboardAttached)")
     }
 
     required init?(coder: NSCoder) {
@@ -1112,12 +1125,16 @@ class GhosttyTerminalView: UIView {
         action: ghostty_input_action_e,
         surface cSurface: ghostty_surface_t
     ) -> Bool {
-        Ghostty.Input.KeyEvent.dispatchHardwareKey(
+        let dispatched = Ghostty.Input.KeyEvent.dispatchHardwareKey(
             .init(uiKey: key),
             action: ghosttyInputAction(action)
         ) { cEvent in
             ghostty_surface_key(cSurface, cEvent)
         }
+        traceInput(
+            "sendDirectHardwareKeyEvent action=\(action.rawValue) keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' mods=\(key.modifierFlags.rawValue) dispatched=\(dispatched)"
+        )
+        return dispatched
     }
 
     private func shouldRoutePressToSystemTextInput(_ key: UIKey) -> Bool {
@@ -1138,6 +1155,7 @@ class GhosttyTerminalView: UIView {
         let text = key.characters.precomposedStringWithCanonicalMapping
         guard !text.isEmpty, !text.hasPrefix("UIKeyInput") else { return }
         hardwareInsertTextSuppression.queue(text)
+        traceInput("queueSuppress text='\(text)' keyCode=\(key.keyCode.rawValue)")
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -1154,22 +1172,34 @@ class GhosttyTerminalView: UIView {
                 forwardedToSystem.insert(press)
                 continue
             }
+            traceInput(
+                "pressesBegan keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' mods=\(key.modifierFlags.rawValue)"
+            )
             markHardwareKeyboardDetectedFromKeyPress()
             if handleCommandShortcut(key) { continue }
-            if shouldRoutePressToSystemTextInput(key) {
+            let routeToSystemTextInput = shouldRoutePressToSystemTextInput(key)
+            if routeToSystemTextInput {
                 systemTextInputPresses.insert(UInt16(key.keyCode.rawValue))
                 forwardedToSystem.insert(press)
+                traceInput("pressesBegan routeToSystemTextInput keyCode=\(key.keyCode.rawValue)")
                 continue
             }
 
             let keyCode = UInt16(key.keyCode.rawValue)
-            if sendDirectHardwareKeyEvent(key, action: GHOSTTY_ACTION_PRESS, surface: cSurface) {
+            let directDispatched = sendDirectHardwareKeyEvent(
+                key,
+                action: GHOSTTY_ACTION_PRESS,
+                surface: cSurface
+            )
+            if directDispatched {
                 hardwarePressesSentToGhostty.insert(keyCode)
                 fallbackHardwarePressKeys.removeValue(forKey: keyCode)
                 fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
+                lastGhosttyHardwarePressAt = CFAbsoluteTimeGetCurrent()
                 queueHardwareInsertTextSuppressionIfNeeded(for: key)
                 startKeyRepeat(for: key)
                 didHandleGhosttyInput = true
+                traceInput("pressesBegan directDispatched keyCode=\(key.keyCode.rawValue)")
             } else if let fallbackKey = fallbackHardwareKey(for: key) {
                 let keyCode = UInt16(key.keyCode.rawValue)
                 surface.sendKeyEvent(
@@ -1182,9 +1212,13 @@ class GhosttyTerminalView: UIView {
                 hardwarePressesSentToGhostty.insert(keyCode)
                 fallbackHardwarePressKeys[keyCode] = fallbackKey
                 fallbackHardwarePressModifiers[keyCode] = key.modifierFlags
+                lastGhosttyHardwarePressAt = CFAbsoluteTimeGetCurrent()
                 queueHardwareInsertTextSuppressionIfNeeded(for: key)
                 startKeyRepeat(for: key)
                 didHandleGhosttyInput = true
+                traceInput("pressesBegan fallbackDispatched keyCode=\(key.keyCode.rawValue)")
+            } else {
+                traceInput("pressesBegan notDispatched keyCode=\(key.keyCode.rawValue)")
             }
         }
 
@@ -1211,12 +1245,16 @@ class GhosttyTerminalView: UIView {
                 forwardedToSystem.insert(press)
                 continue
             }
+            traceInput(
+                "pressesEnded keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' mods=\(key.modifierFlags.rawValue)"
+            )
             let keyCode = UInt16(key.keyCode.rawValue)
             guard hardwarePressesSentToGhostty.contains(keyCode) else {
                 fallbackHardwarePressKeys.removeValue(forKey: keyCode)
                 fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
                 systemTextInputPresses.remove(keyCode)
                 forwardedToSystem.insert(press)
+                traceInput("pressesEnded forwardedToSystem keyCode=\(key.keyCode.rawValue)")
                 continue
             }
             hardwarePressesSentToGhostty.remove(keyCode)
@@ -1229,6 +1267,7 @@ class GhosttyTerminalView: UIView {
 
             if sendDirectHardwareKeyEvent(key, action: GHOSTTY_ACTION_RELEASE, surface: cSurface) {
                 didHandleGhosttyInput = true
+                traceInput("pressesEnded directDispatched keyCode=\(key.keyCode.rawValue)")
             } else if let fallbackKey {
                 surface.sendKeyEvent(
                     fallbackHardwareEvent(
@@ -1238,6 +1277,7 @@ class GhosttyTerminalView: UIView {
                     )
                 )
                 didHandleGhosttyInput = true
+                traceInput("pressesEnded fallbackDispatched keyCode=\(key.keyCode.rawValue)")
             }
         }
 
@@ -2511,12 +2551,27 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
         if text.hasPrefix("UIKeyInput") {
             return
         }
+        traceInput(
+            "insertText text='\(text)' hasHardware=\(hasHardwareKeyboardAttached) ime=\(hasActiveIMEComposition) systemTextInputPresses=\(systemTextInputPresses.count)"
+        )
+        let now = CFAbsoluteTimeGetCurrent()
         // Hardware key presses are sent via ghostty_surface_key; suppress duplicate
         // insertText payloads that can leak printable text into TUIs (e.g. zellij modes).
-        if hasHardwareKeyboardAttached,
-           !hasActiveIMEComposition,
-           systemTextInputPresses.isEmpty,
-           hardwareInsertTextSuppression.shouldSuppress(text) {
+        let suppressionQueued = hasHardwareKeyboardAttached
+            && !hasActiveIMEComposition
+            && systemTextInputPresses.isEmpty
+            && hardwareInsertTextSuppression.shouldSuppress(text, now: now)
+        let suppressionFallback = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
+            text: text,
+            hasHardwareKeyboardAttached: hasHardwareKeyboardAttached,
+            hasActiveIMEComposition: hasActiveIMEComposition,
+            systemTextInputPressesCount: systemTextInputPresses.count,
+            now: now,
+            lastGhosttyHardwarePressAt: lastGhosttyHardwarePressAt
+        )
+        if suppressionQueued || suppressionFallback {
+            let reason = suppressionQueued ? "queue" : "recentHardwareFallback"
+            traceInput("insertText suppressed text='\(text)' reason=\(reason)")
             return
         }
         if hasActiveIMEComposition {

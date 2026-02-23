@@ -39,4 +39,26 @@ struct HardwareInsertTextSuppressionState {
         pending.removeAll { now - $0.enqueuedAt > ttlSeconds }
     }
 }
+
+struct GhosttyHardwareInsertTextPolicy {
+    static let fallbackSuppressionWindow: CFAbsoluteTime = 0.45
+
+    static func shouldSuppressFallbackInsertText(
+        text: String,
+        hasHardwareKeyboardAttached: Bool,
+        hasActiveIMEComposition: Bool,
+        systemTextInputPressesCount: Int,
+        now: CFAbsoluteTime,
+        lastGhosttyHardwarePressAt: CFAbsoluteTime
+    ) -> Bool {
+        guard hasHardwareKeyboardAttached else { return false }
+        guard !hasActiveIMEComposition else { return false }
+        guard systemTextInputPressesCount == 0 else { return false }
+        guard text.count == 1 else { return false }
+        guard let scalar = text.unicodeScalars.first, scalar.value >= 0x20 else { return false }
+        guard !text.hasPrefix("UIKeyInput") else { return false }
+        guard lastGhosttyHardwarePressAt > 0 else { return false }
+        return now - lastGhosttyHardwarePressAt <= fallbackSuppressionWindow
+    }
+}
 #endif
