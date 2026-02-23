@@ -459,7 +459,7 @@
 		537AC15AFBCABBBF98C1A867 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -468,7 +468,7 @@
 				INFOPLIST_FILE = VVTermLiveActivity/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 2.15;
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm LiveActivity AdHoc 20260222-211120";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm LiveActivity AdHoc 20260620-174532";
 				PRODUCT_BUNDLE_IDENTIFIER = es.javisoto.vvterm.liveactivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -482,7 +482,7 @@
 		BE426D52CBCDBEDF46FBD0BB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -491,7 +491,7 @@
 				INFOPLIST_FILE = VVTermLiveActivity/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 2.15;
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm LiveActivity AdHoc 20260222-211120";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm LiveActivity AdHoc 20260620-174532";
 				PRODUCT_BUNDLE_IDENTIFIER = es.javisoto.vvterm.liveactivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -511,7 +511,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "VVTerm-iOS/VVTerm-local.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "VVTerm-iOS/VVTerm-local.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "VVTerm-macOS/VVTerm.entitlements";
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -626,7 +626,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = es.javisoto.vvterm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				"PRODUCT_NAME[sdk=macosx*]" = VVTerm;
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm Codex AdHoc 20260222-211120";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm Codex AdHoc 20260620-174531";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -655,7 +655,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "VVTerm-iOS/VVTerm-local.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "VVTerm-iOS/VVTerm-local.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "VVTerm-macOS/VVTerm.entitlements";
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -770,7 +770,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = es.javisoto.vvterm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				"PRODUCT_NAME[sdk=macosx*]" = VVTerm;
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm Codex AdHoc 20260222-211120";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "VVTerm Codex AdHoc 20260620-174531";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
