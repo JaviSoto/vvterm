@@ -10,8 +10,10 @@ struct GhosttyIOSHardwareInsertTextSuppressionTests {
         var state = HardwareInsertTextSuppressionState(ttlSeconds: 1.0, maxPendingEntries: 4)
         state.queue("n", now: 10.0)
 
-        #expect(state.shouldSuppress("n", now: 10.1))
-        #expect(state.shouldSuppress("n", now: 10.2) == false)
+        let firstSuppressed = state.shouldSuppress("n", now: 10.1)
+        let secondSuppressed = state.shouldSuppress("n", now: 10.2)
+        #expect(firstSuppressed)
+        #expect(secondSuppressed == false)
     }
 
     @Test
@@ -19,7 +21,8 @@ struct GhosttyIOSHardwareInsertTextSuppressionTests {
         var state = HardwareInsertTextSuppressionState(ttlSeconds: 0.5, maxPendingEntries: 4)
         state.queue("n", now: 10.0)
 
-        #expect(state.shouldSuppress("n", now: 10.6) == false)
+        let suppressed = state.shouldSuppress("n", now: 10.6)
+        #expect(suppressed == false)
     }
 
     @Test
@@ -27,8 +30,10 @@ struct GhosttyIOSHardwareInsertTextSuppressionTests {
         var state = HardwareInsertTextSuppressionState(ttlSeconds: 1.0, maxPendingEntries: 4)
         state.queue("n", now: 10.0)
 
-        #expect(state.shouldSuppress("x", now: 10.1) == false)
-        #expect(state.shouldSuppress("n", now: 10.2))
+        let wrongTextSuppressed = state.shouldSuppress("x", now: 10.1)
+        let queuedTextSuppressed = state.shouldSuppress("n", now: 10.2)
+        #expect(wrongTextSuppressed == false)
+        #expect(queuedTextSuppressed)
     }
 }
 #endif
