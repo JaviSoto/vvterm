@@ -157,6 +157,22 @@ open VVTerm.xcodeproj
 
 `./scripts/build.sh` supports `all`, `ghostty`, `ssh`, `clean`, and `help`.
 
+### Headless iOS Ad-Hoc Build (javimini)
+
+For repeatable CLI builds on `javimini` with manual ad-hoc profiles:
+
+```bash
+./scripts/build_adhoc_javimini.sh
+```
+
+Environment overrides:
+
+- `TEAM_ID` (default `6V6XY979JQ`)
+- `APP_PROFILE` (default `VVTerm Codex AdHoc 20260222-215936`)
+- `EXT_PROFILE` (default `VVTerm LiveActivity AdHoc 20260222-215936`)
+- `KEYCHAIN_PATH` (default `~/Library/Keychains/codex-signing.keychain-db`)
+- `KEYCHAIN_PASSWORD_FILE` (default `~/.codex/secrets/javimini-keychain-password`)
+
 ## Dependencies
 
 Native/vendor dependencies:
