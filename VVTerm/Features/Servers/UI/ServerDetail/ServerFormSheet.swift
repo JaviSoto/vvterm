@@ -649,7 +649,7 @@ struct ServerFormSheet: View {
             TextField(
                 String(localized: "Startup command (optional)"),
                 text: $form.startupCommand,
-                prompt: Text(String(localized: "zellij attach"))
+                prompt: Text(String(localized: "Startup command"))
             )
             .autocorrectionDisabled()
             #if os(iOS)
