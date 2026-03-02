@@ -9,6 +9,31 @@ final class StoreManagerLifecycleTests: XCTestCase {
         displayPrice: "$6.49"
     )
 
+    func testForcedProBuildNeverUsesStoreClient() async {
+        let client = StoreClientFake()
+        let manager = StoreManager(
+            client: client,
+            effects: .none,
+            forceProForTesting: true
+        )
+
+        manager.start()
+        await manager.loadProducts()
+        await manager.purchase(monthlyProduct)
+        await manager.restorePurchases()
+        await manager.checkEntitlements()
+
+        XCTAssertTrue(manager.isPro)
+        XCTAssertTrue(manager.isLifetime)
+        XCTAssertEqual(manager.purchaseState, .purchased)
+        XCTAssertEqual(manager.restoreState, .restored(hasAccess: true))
+        XCTAssertEqual(client.productRequestCount, 0)
+        XCTAssertEqual(client.purchasedProductIds, [])
+        XCTAssertEqual(client.syncCount, 0)
+        XCTAssertEqual(client.entitlementRequestCount, 0)
+        XCTAssertEqual(client.transactionUpdateRequestCount, 0)
+    }
+
     func testVerifiedPurchaseRefreshesEntitlementsAndCompletesPurchase() async {
         let client = StoreClientFake()
         client.purchaseResult = .verified(productId: VVTermProducts.proMonthly)

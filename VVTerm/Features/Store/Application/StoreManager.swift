@@ -36,6 +36,11 @@ nonisolated struct StoreEntitlementSnapshot: Equatable, Sendable {
 final class StoreManager: ObservableObject {
     private final class StartupToken {}
     private final class TransactionListenerToken {}
+    #if VVTERM_FORCE_PRO_FOR_TESTING
+    static let isForcedProForTestingBuild = true
+    #else
+    static let isForcedProForTestingBuild = false
+    #endif
 
     @Published private(set) var entitlementSnapshot = StoreEntitlementSnapshot.checking
     @Published private(set) var products: [StoreProduct] = []
@@ -55,6 +60,7 @@ final class StoreManager: ObservableObject {
     private var restoreOperationID: UUID?
     private let client: any StoreClient
     private let effects: StoreManagerEffects
+    private let forceProForTesting: Bool
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "app.vivy.VVTerm",
         category: "Store"
@@ -99,13 +105,22 @@ final class StoreManager: ObservableObject {
 
     init(
         client: any StoreClient,
-        effects: StoreManagerEffects
+        effects: StoreManagerEffects,
+        forceProForTesting: Bool = Self.isForcedProForTestingBuild
     ) {
         self.client = client
         self.effects = effects
+        self.forceProForTesting = forceProForTesting
+        if forceProForTesting {
+            entitlementSnapshot = Self.forcedProEntitlementSnapshot
+        }
     }
 
     func start() {
+        guard !forceProForTesting else {
+            logger.info("Store running in forced Pro testing mode")
+            return
+        }
         guard startupTask == nil, updateListenerTask == nil else { return }
         startTransactionListener()
         let token = StartupToken()
@@ -158,6 +173,10 @@ final class StoreManager: ObservableObject {
     // MARK: - Load Products
 
     func loadProducts() async {
+        guard !forceProForTesting else {
+            products = []
+            return
+        }
         let operationID = UUID()
         productOperationID = operationID
         guard let loadedProducts = await Self.loadProducts(using: client, logger: logger) else {
@@ -240,6 +259,11 @@ final class StoreManager: ObservableObject {
     // MARK: - Purchase
 
     func purchase(_ product: StoreProduct) async {
+        guard !forceProForTesting else {
+            lastPurchasedProductId = product.id
+            purchaseState = .purchased
+            return
+        }
         let operationID = UUID()
         purchaseOperationID = operationID
         defer {
@@ -304,6 +328,10 @@ final class StoreManager: ObservableObject {
     // MARK: - Restore Purchases
 
     func restorePurchases() async {
+        guard !forceProForTesting else {
+            restoreState = .restored(hasAccess: true)
+            return
+        }
         let operationID = UUID()
         restoreOperationID = operationID
         defer {
@@ -329,6 +357,10 @@ final class StoreManager: ObservableObject {
     // MARK: - Check Entitlements
 
     func checkEntitlements() async {
+        guard !forceProForTesting else {
+            entitlementSnapshot = Self.forcedProEntitlementSnapshot
+            return
+        }
         let operationID = UUID()
         entitlementOperationID = operationID
         let result = await client.entitlements(
@@ -487,4 +519,10 @@ final class StoreManager: ObservableObject {
         VVTermProducts.proMonthly,
         VVTermProducts.proYearly
     ]
+
+    private static let forcedProEntitlementSnapshot = StoreEntitlementSnapshot(
+        accessState: .pro,
+        hasLifetimeAccess: true,
+        subscriptionStatus: nil
+    )
 }
