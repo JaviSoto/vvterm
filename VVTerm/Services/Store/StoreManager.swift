@@ -9,6 +9,11 @@ import os.log
 final class StoreManager: ObservableObject {
     static let shared = StoreManager()
     static let reviewModeCode = ReviewModeCode.value
+    #if VVTERM_FORCE_PRO_FOR_TESTING
+    static let isForcedProForTestingBuild = true
+    #else
+    static let isForcedProForTestingBuild = false
+    #endif
 
     @Published var isPro: Bool = false
     @Published var isLifetime: Bool = false
@@ -80,6 +85,13 @@ final class StoreManager: ObservableObject {
     // MARK: - Initialization
 
     private init() {
+        if Self.isForcedProForTestingBuild {
+            isReviewModeEnabled = true
+            isPro = true
+            isLifetime = true
+            logger.info("Store running in forced Pro testing mode")
+            return
+        }
         updateListenerTask = listenForTransactions()
         Task {
             await loadProducts()
@@ -94,6 +106,10 @@ final class StoreManager: ObservableObject {
     // MARK: - Load Products
 
     func loadProducts() async {
+        guard !Self.isForcedProForTestingBuild else {
+            products = []
+            return
+        }
         let maxRetries = 3
         for attempt in 0..<maxRetries {
             do {
@@ -112,6 +128,11 @@ final class StoreManager: ObservableObject {
     // MARK: - Purchase
 
     func purchase(_ product: Product) async {
+        guard !Self.isForcedProForTestingBuild else {
+            lastPurchasedProductId = product.id
+            purchaseState = .purchased
+            return
+        }
         purchaseState = .purchasing
         lastPurchasedProductId = nil
         logger.info("Purchasing \(product.id)")
@@ -148,6 +169,10 @@ final class StoreManager: ObservableObject {
     // MARK: - Restore Purchases
 
     func restorePurchases() async {
+        guard !Self.isForcedProForTestingBuild else {
+            restoreState = .restored(hasAccess: true)
+            return
+        }
         restoreState = .restoring
         logger.info("Restoring purchases")
         do {
@@ -164,6 +189,12 @@ final class StoreManager: ObservableObject {
     // MARK: - Check Entitlements
 
     func checkEntitlements() async {
+        guard !Self.isForcedProForTestingBuild else {
+            isPro = true
+            isLifetime = true
+            subscriptionStatus = nil
+            return
+        }
         refreshReviewModeState()
         var hasAccess = false
         var hasLifetime = false
