@@ -69,3 +69,19 @@ enum TerminalControlKey {
         return nil
     }
 }
+
+/// Utility for encoding software-keyboard modifier combinations in a TUI-compatible form.
+enum TerminalSoftwareModifierEncoder {
+    /// Encodes Ctrl/Alt + printable key as ANSI bytes when that combination has
+    /// a canonical control-byte representation (e.g. Ctrl+T => 0x14).
+    static func encodeControlSequence(char: Character, ctrl: Bool, alt: Bool) -> Data? {
+        guard ctrl else { return nil }
+        guard let controlChar = TerminalControlKey.controlCharacter(for: char) else { return nil }
+        var data = Data()
+        if alt {
+            data.append(0x1B)
+        }
+        data.append(contentsOf: String(controlChar).utf8)
+        return data
+    }
+}
