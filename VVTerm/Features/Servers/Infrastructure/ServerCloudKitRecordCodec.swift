@@ -9,7 +9,7 @@ nonisolated enum ServerCloudKitRecordCodec {
         "connectionMode", "authMethod", "cloudflareAccessMode",
         "cloudflareTeamDomainOverride", "cloudflareAppDomainOverride", "tags", "notes",
         "lastConnected", "isFavorite", "requiresBiometricUnlock", "tmuxEnabledOverride",
-        "tmuxStartupBehaviorOverride", "createdAt", "updatedAt", "environment"
+        "tmuxStartupBehaviorOverride", "startupCommand", "createdAt", "updatedAt", "environment"
     ]
 
     private static let logger = Logger(
@@ -78,6 +78,7 @@ nonisolated enum ServerCloudKitRecordCodec {
             tmuxEnabledOverride: record["tmuxEnabledOverride"] as? Bool,
             tmuxStartupBehaviorOverride: (record["tmuxStartupBehaviorOverride"] as? String)
                 .flatMap(TmuxStartupBehavior.init(rawValue:)),
+            startupCommand: record["startupCommand"] as? String,
             createdAt: record["createdAt"] as? Date ?? now,
             updatedAt: record["updatedAt"] as? Date ?? now
         )
@@ -115,6 +116,7 @@ nonisolated enum ServerCloudKitRecordCodec {
         record["requiresBiometricUnlock"] = server.requiresBiometricUnlock
         record["tmuxEnabledOverride"] = server.tmuxEnabledOverride
         record["tmuxStartupBehaviorOverride"] = server.tmuxStartupBehaviorOverride?.rawValue
+        record["startupCommand"] = nonempty(server.startupCommand)
         record["createdAt"] = server.createdAt
         record["updatedAt"] = now
         if let environment = try? JSONEncoder().encode(server.environment) {

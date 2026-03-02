@@ -79,6 +79,7 @@ nonisolated struct ServerFormModel: Equatable, Sendable {
     var requiresBiometricUnlock: Bool
     var tmuxEnabled: Bool
     var tmuxStartupBehavior: TmuxStartupBehavior
+    var startupCommand: String
 
     init(
         server: Server? = nil,
@@ -107,6 +108,7 @@ nonisolated struct ServerFormModel: Equatable, Sendable {
         requiresBiometricUnlock = server?.requiresBiometricUnlock ?? false
         tmuxEnabled = server?.tmuxEnabledOverride ?? defaultTmuxEnabled
         tmuxStartupBehavior = server?.tmuxStartupBehaviorOverride ?? defaultTmuxStartupBehavior
+        startupCommand = server?.startupCommand ?? ""
     }
 
     var isValid: Bool {
@@ -197,6 +199,7 @@ nonisolated struct ServerFormModel: Equatable, Sendable {
             requiresBiometricUnlock: requiresBiometricUnlock,
             tmuxEnabledOverride: tmuxEnabled,
             tmuxStartupBehaviorOverride: tmuxStartupBehavior,
+            startupCommand: normalizedOptional(startupCommand),
             createdAt: createdAt
         )
     }

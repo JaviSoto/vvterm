@@ -197,6 +197,21 @@ nonisolated enum RemoteTerminalBootstrap {
         environment.shellProfile.launchPlan(startupCommand: startupCommand, bundle: bundle)
     }
 
+    /// Normalizes a command for entry into an already-running interactive shell.
+    nonisolated static func interactiveCommandPayload(
+        _ startupCommand: String?,
+        environment: RemoteEnvironment = .fallbackPOSIX
+    ) -> String? {
+        guard let command = trimmedStartupCommand(startupCommand) else { return nil }
+        let lineEnding = switch environment.shellProfile.family {
+        case .powershell, .cmd:
+            "\r\n"
+        case .posix, .unknown:
+            "\n"
+        }
+        return command + lineEnding
+    }
+
     nonisolated static func moshStartupScript(
         startCommand: String?,
         terminalType: RemoteTerminalType = defaultTerminalType,

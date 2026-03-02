@@ -132,6 +132,7 @@ nonisolated struct ServerMutationCommandRepository: Sendable {
             requiresBiometricUnlock: server.requiresBiometricUnlock,
             tmuxEnabledOverride: server.tmuxEnabledOverride,
             tmuxStartupBehaviorOverride: server.tmuxStartupBehaviorOverride,
+            startupCommand: server.startupCommand,
             createdAt: now,
             updatedAt: now
         )
@@ -159,6 +160,7 @@ nonisolated struct ServerMutationCommandRepository: Sendable {
             requiresBiometricUnlock: server.requiresBiometricUnlock,
             tmuxEnabledOverride: server.tmuxEnabledOverride,
             tmuxStartupBehaviorOverride: server.tmuxStartupBehaviorOverride,
+            startupCommand: server.startupCommand,
             createdAt: server.createdAt,
             updatedAt: now
         )

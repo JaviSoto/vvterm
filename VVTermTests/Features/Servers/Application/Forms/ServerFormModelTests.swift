@@ -31,6 +31,7 @@ struct ServerFormModelTests {
         model.requiresBiometricUnlock = true
         model.tmuxEnabled = true
         model.tmuxStartupBehavior = .vvtermManaged
+        model.startupCommand = "  zellij attach  "
 
         #expect(model.isValid)
 
@@ -49,6 +50,7 @@ struct ServerFormModelTests {
         #expect(server.connectionMode == .cloudflare)
         #expect(server.cloudflareAccessMode == .serviceToken)
         #expect(server.cloudflareTeamDomainOverride == "team.cloudflareaccess.com")
+        #expect(server.startupCommand == "zellij attach")
         #expect(server.createdAt == createdAt)
         #expect(String(data: try #require(credentials.privateKey), encoding: .utf8) == "PRIVATE")
         #expect(credentials.passphrase == "phrase")
@@ -109,7 +111,8 @@ struct ServerFormModelTests {
             notes: "keep",
             requiresBiometricUnlock: true,
             tmuxEnabledOverride: false,
-            tmuxStartupBehaviorOverride: .askEveryTime
+            tmuxStartupBehaviorOverride: .askEveryTime,
+            startupCommand: "zellij attach"
         )
         var model = ServerFormModel(
             server: server,
@@ -135,6 +138,7 @@ struct ServerFormModelTests {
         #expect(rebuilt.host == server.host)
         #expect(rebuilt.username == server.username)
         #expect(rebuilt.notes == server.notes)
+        #expect(rebuilt.startupCommand == server.startupCommand)
         #expect(model.sshKey == "PRIVATE")
         #expect(model.sshPublicKey == "PUBLIC")
         #expect(model.sshPassphrase == "phrase")

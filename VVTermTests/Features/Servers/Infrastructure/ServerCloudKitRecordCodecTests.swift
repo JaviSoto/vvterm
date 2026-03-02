@@ -115,6 +115,7 @@ struct ServerCloudKitRecordCodecTests {
             requiresBiometricUnlock: true,
             tmuxEnabledOverride: false,
             tmuxStartupBehaviorOverride: .skipTmux,
+            startupCommand: "zellij attach",
             createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
             updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
         )

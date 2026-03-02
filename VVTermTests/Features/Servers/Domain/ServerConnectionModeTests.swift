@@ -95,6 +95,27 @@ struct ServerConnectionModeTests {
     }
 
     @Test
+    func decodeWithoutStartupCommandDefaultsToNil() throws {
+        let server = makeServer(connectionMode: .standard, authMethod: .password)
+        let data = try mutateJSON(server) { object in
+            object.removeValue(forKey: "startupCommand")
+        }
+
+        let decoded = try JSONDecoder().decode(Server.self, from: data)
+        #expect(decoded.startupCommand == nil)
+    }
+
+    @Test
+    func encodeDecodePreservesStartupCommand() throws {
+        var server = makeServer(connectionMode: .standard, authMethod: .password)
+        server.startupCommand = "zellij attach"
+
+        let data = try JSONEncoder().encode(server)
+        let decoded = try JSONDecoder().decode(Server.self, from: data)
+        #expect(decoded.startupCommand == "zellij attach")
+    }
+
+    @Test
     func decodeWithUnknownConnectionModeDefaultsToStandard() throws {
         let server = makeServer(connectionMode: .standard, authMethod: .password)
         let data = try mutateJSON(server) { object in

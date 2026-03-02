@@ -138,9 +138,17 @@ final class TerminalPaneSSHCoordinator {
             registerShell: { shell in
                 guard await context.registerShell(shell) else { return false }
                 context.updateConnectionState(.connected)
-                if shell.origin == .fresh, let cwd = context.workingDirectory() {
-                    await applyWorkingDirectory(
-                        cwd,
+                if shell.origin == .fresh, context.shouldApplyPlainShellSetup() {
+                    if let cwd = context.workingDirectory() {
+                        await applyWorkingDirectory(
+                            cwd,
+                            shellId: shell.id,
+                            sshClient: sshClient,
+                            logger: logger
+                        )
+                    }
+                    await applyStartupCommand(
+                        server.startupCommand,
                         shellId: shell.id,
                         sshClient: sshClient,
                         logger: logger
@@ -207,5 +215,26 @@ final class TerminalPaneSSHCoordinator {
         }
         guard let payload = command.data(using: .utf8) else { return }
         try? await sshClient.write(payload, to: shellId)
+    }
+
+    private static func applyStartupCommand(
+        _ startupCommand: String?,
+        shellId: UUID,
+        sshClient: SSHClient,
+        logger: Logger
+    ) async {
+        let environment = await sshClient.remoteEnvironment()
+        guard let command = RemoteTerminalBootstrap.interactiveCommandPayload(
+            startupCommand,
+            environment: environment
+        ), let payload = command.data(using: .utf8) else {
+            return
+        }
+
+        do {
+            try await sshClient.write(payload, to: shellId)
+        } catch {
+            logger.error("Failed to send startup command: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

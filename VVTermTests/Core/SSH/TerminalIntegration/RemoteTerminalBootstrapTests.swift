@@ -106,6 +106,36 @@ struct RemoteTerminalBootstrapTests {
     }
 
     @Test
+    func interactiveStartupCommandTrimsInputAndUsesPOSIXLineEnding() {
+        let payload = RemoteTerminalBootstrap.interactiveCommandPayload(
+            "  zellij attach  \n",
+            environment: posixEnvironment
+        )
+
+        #expect(payload == "zellij attach\n")
+    }
+
+    @Test
+    func interactiveStartupCommandUsesWindowsLineEnding() {
+        let payload = RemoteTerminalBootstrap.interactiveCommandPayload(
+            "Write-Output 'hi'",
+            environment: powerShellEnvironment
+        )
+
+        #expect(payload == "Write-Output 'hi'\r\n")
+    }
+
+    @Test
+    func interactiveStartupCommandRejectsWhitespaceOnlyInput() {
+        #expect(
+            RemoteTerminalBootstrap.interactiveCommandPayload(
+                " \n\t ",
+                environment: posixEnvironment
+            ) == nil
+        )
+    }
+
+    @Test
     func directoryChangeCommandUsesPOSIXCdForUnixPaths() {
         let plan = RemoteTerminalBootstrap.workingDirectoryRestorePlan(
             for: "/var/www/app's",

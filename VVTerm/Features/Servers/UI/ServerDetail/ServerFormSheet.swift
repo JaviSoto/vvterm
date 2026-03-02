@@ -645,10 +645,20 @@ struct ServerFormSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            TextField(
+                String(localized: "Startup command (optional)"),
+                text: $form.startupCommand,
+                prompt: Text(String(localized: "zellij attach"))
+            )
+            .autocorrectionDisabled()
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            #endif
         } header: {
             sectionHeader("Session")
         } footer: {
-            Text("Sessions stay alive across app restarts and disconnects when tmux is available.")
+            Text("Sessions stay alive across app restarts and disconnects when tmux is available. Startup command runs once after shell starts when tmux is off.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

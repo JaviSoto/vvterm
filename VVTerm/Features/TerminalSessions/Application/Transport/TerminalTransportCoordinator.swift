@@ -933,6 +933,9 @@ final class TerminalTransportCoordinator {
                 guard ownsConnection() else { return }
                 sessionAccess.send(.connectionState(paneId, .failed(failure)))
             },
+            shouldApplyPlainShellSetup: {
+                ownsConnection() && sessionAccess.shouldApplyWorkingDirectory(paneId)
+            },
             workingDirectory: {
                 guard ownsConnection(), sessionAccess.shouldApplyWorkingDirectory(paneId) else {
                     return nil

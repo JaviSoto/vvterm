@@ -15,6 +15,7 @@ struct ServerMutationCommandRepositoryTests {
             name: "New",
             host: "new.example.test",
             username: "root",
+            startupCommand: "zellij attach",
             lastConnected: .distantPast,
             isFavorite: true,
             createdAt: .distantPast,
@@ -34,6 +35,7 @@ struct ServerMutationCommandRepositoryTests {
         #expect(inserted.updatedAt == now)
         #expect(inserted.lastConnected == nil)
         #expect(!inserted.isFavorite)
+        #expect(inserted.startupCommand == input.startupCommand)
         #expect(result.effect == .serverUpsert(inserted))
     }
 
@@ -48,6 +50,7 @@ struct ServerMutationCommandRepositoryTests {
             name: "Edited",
             host: "edited.example.test",
             username: "root",
+            startupCommand: "zellij attach",
             lastConnected: lastConnected,
             isFavorite: true,
             createdAt: createdAt,
@@ -67,6 +70,7 @@ struct ServerMutationCommandRepositoryTests {
         #expect(updated.updatedAt == now)
         #expect(updated.lastConnected == lastConnected)
         #expect(updated.isFavorite)
+        #expect(updated.startupCommand == input.startupCommand)
     }
 
     @Test

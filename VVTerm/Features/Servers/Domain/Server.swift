@@ -26,6 +26,8 @@ nonisolated struct Server: Identifiable, Codable, Hashable, Sendable {
     var tmuxEnabledOverride: Bool?
     /// Override for tmux startup behavior (nil = use global default)
     var tmuxStartupBehaviorOverride: TmuxStartupBehavior?
+    /// Optional command to send automatically after shell startup (eg: "zellij attach")
+    var startupCommand: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -50,6 +52,7 @@ nonisolated struct Server: Identifiable, Codable, Hashable, Sendable {
         requiresBiometricUnlock: Bool = false,
         tmuxEnabledOverride: Bool? = nil,
         tmuxStartupBehaviorOverride: TmuxStartupBehavior? = nil,
+        startupCommand: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -75,6 +78,7 @@ nonisolated struct Server: Identifiable, Codable, Hashable, Sendable {
         self.requiresBiometricUnlock = requiresBiometricUnlock
         self.tmuxEnabledOverride = tmuxEnabledOverride
         self.tmuxStartupBehaviorOverride = tmuxStartupBehaviorOverride
+        self.startupCommand = startupCommand
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -107,6 +111,7 @@ nonisolated struct Server: Identifiable, Codable, Hashable, Sendable {
         case requiresBiometricUnlock
         case tmuxEnabledOverride
         case tmuxStartupBehaviorOverride
+        case startupCommand
         case createdAt
         case updatedAt
     }
@@ -142,6 +147,7 @@ nonisolated struct Server: Identifiable, Codable, Hashable, Sendable {
         } else {
             tmuxStartupBehaviorOverride = nil
         }
+        startupCommand = try container.decodeIfPresent(String.self, forKey: .startupCommand)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
@@ -168,6 +174,7 @@ nonisolated struct Server: Identifiable, Codable, Hashable, Sendable {
         try container.encode(requiresBiometricUnlock, forKey: .requiresBiometricUnlock)
         try container.encodeIfPresent(tmuxEnabledOverride, forKey: .tmuxEnabledOverride)
         try container.encodeIfPresent(tmuxStartupBehaviorOverride, forKey: .tmuxStartupBehaviorOverride)
+        try container.encodeIfPresent(startupCommand, forKey: .startupCommand)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
     }

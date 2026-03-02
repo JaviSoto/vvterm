@@ -65,6 +65,7 @@ struct TerminalSSHConnectionContext {
     let hasOtherRegistrations: @MainActor @Sendable () async -> Bool
     let handleShellEnd: @MainActor @Sendable (_ shellId: UUID, _ reason: TerminalShellEndReason) -> Void
     let handleFailure: @MainActor @Sendable (TerminalConnectionFailure) -> Void
+    let shouldApplyPlainShellSetup: @MainActor @Sendable () -> Bool
     let workingDirectory: @MainActor @Sendable () -> String?
 }
 
