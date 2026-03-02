@@ -1267,11 +1267,20 @@ class GhosttyTerminalView: UIView {
     }
 
     private func sendControlByte(_ value: UInt8) {
-        let scalar = UnicodeScalar(value)
-        sendText(String(Character(scalar)))
+        sendRawInputData(Data([value]))
     }
 
     private func sendAnsiSequence(_ data: Data) {
+        sendRawInputData(data)
+    }
+
+    private func sendRawInputData(_ data: Data) {
+        guard !data.isEmpty else { return }
+        if let writeCallback {
+            writeCallback(data)
+            requestRender()
+            return
+        }
         let text = String(decoding: data, as: UTF8.self)
         sendText(text)
     }
@@ -1322,15 +1331,7 @@ class GhosttyTerminalView: UIView {
     }
 
     private func sendControlShortcut(_ char: Character) {
-        let lower = String(char).lowercased()
-        if let key = Ghostty.Input.Key(rawValue: lower) {
-            let codepoint = lower.unicodeScalars.first?.value ?? 0
-            sendModifiedKey(key, mods: [.ctrl], text: lower, unshiftedCodepoint: codepoint)
-            return
-        }
-        if let controlChar = TerminalControlKey.controlCharacter(for: char) {
-            sendText(String(controlChar))
-        }
+        sendControlKey(char)
     }
 
     private func sendTextKeyEvent(_ text: String) {
@@ -1382,8 +1383,9 @@ class GhosttyTerminalView: UIView {
     /// Send control key combination (e.g., Ctrl+C)
     func sendControlKey(_ char: Character) {
         guard surface != nil else { return }
-        if let controlChar = TerminalControlKey.controlCharacter(for: char) {
-            sendText(String(controlChar))
+        if let controlChar = TerminalControlKey.controlCharacter(for: char),
+           let ascii = controlChar.asciiValue {
+            sendControlByte(ascii)
         }
     }
 
@@ -2428,6 +2430,23 @@ private class TerminalInputAccessoryView: UIInputView {
         return (ctrl, alt, shift)
     }
 
+    func consumeModifierFlags() -> UIKeyModifierFlags {
+        let consumed = consumeModifiers()
+        var flags: UIKeyModifierFlags = []
+        if consumed.ctrl {
+            flags.insert(.control)
+        }
+        if consumed.alt {
+            flags.insert(.alternate)
+        }
+        return flags
+    }
+
+    func setModifiersForTesting(ctrl: Bool, alt: Bool) {
+        ctrlActive = ctrl
+        altActive = alt
+        updateModifierState()
+    }
     private func updateModifierState() {
         UIView.animate(withDuration: 0.2) {
             self.updateModifierButton(self.ctrlButton, isActive: self.ctrlActive)
@@ -2494,6 +2513,27 @@ private final class RepeatableKeyButton: UIButton {
 extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
     var hasText: Bool { true }
 
+    func harnessInjectSoftwareCtrlSequence(primary: String, followup: String) {
+        guard primary.count == 1, followup.count == 1 else { return }
+        if keyboardToolbar == nil {
+            _ = inputAccessoryView
+        }
+        guard keyboardToolbar != nil else {
+            // Test fallback when no software keyboard toolbar exists in simulator automation.
+            sendModifiedKey(.t, mods: [.ctrl], text: "t", unshiftedCodepoint: 116)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                self?.insertText(followup)
+            }
+            return
+        }
+        keyboardToolbar?.setModifiersForTesting(ctrl: true, alt: false)
+        traceInput("harnessInjectSoftwareCtrlSequence primary='\(primary)' followup='\(followup)'")
+        insertText(primary)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.insertText(followup)
+        }
+    }
+
     func insertText(_ text: String) {
         let text = text.precomposedStringWithCanonicalMapping
         if text.hasPrefix("UIKeyInput") {
@@ -2511,6 +2551,17 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
             let mods = toolbar.consumeModifiers()
             if mods.ctrl || mods.alt {
                 if let firstChar = text.first {
+                    if let controlSequence = TerminalSoftwareModifierEncoder.encodeControlSequence(
+                        char: firstChar,
+                        ctrl: mods.ctrl,
+                        alt: mods.alt
+                    ) {
+                        sendAnsiSequence(controlSequence)
+                        if text.count > 1 {
+                            sendText(String(text.dropFirst()))
+                        }
+                        return
+                    }
                     let lower = String(firstChar).lowercased()
                     if let key = Ghostty.Input.Key(rawValue: lower) {
                         var ghostMods: Ghostty.Input.Mods = []
@@ -2559,6 +2610,16 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
             sendText(normalized.replacingOccurrences(of: "\n", with: "\r"))
             moveTextInputCursor(by: normalized.utf16.count)
             return
+        }
+
+        if text.count == 1,
+           let scalar = text.unicodeScalars.first {
+            let lower = String(Character(scalar)).lowercased()
+            if let key = Ghostty.Input.Key(rawValue: lower) {
+                let unshiftedCodepoint = lower.unicodeScalars.first?.value ?? scalar.value
+                sendModifiedKey(key, mods: [], text: lower, unshiftedCodepoint: unshiftedCodepoint)
+                return
+            }
         }
 
         sendText(text)
