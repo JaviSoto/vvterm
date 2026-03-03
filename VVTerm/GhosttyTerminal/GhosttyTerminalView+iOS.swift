@@ -13,6 +13,7 @@ import SwiftUI
 import IOSurface
 import CoreImage
 import GameController
+import Foundation
 
 /// UIView that embeds a Ghostty terminal surface with Metal rendering
 ///
@@ -86,6 +87,7 @@ class GhosttyTerminalView: UIView {
 
     private var isSelecting = false
     private var isScrolling = false
+    private var activeIndirectButtonMask: UIEvent.ButtonMask = []
     private lazy var selectionRecognizer: UILongPressGestureRecognizer = {
         let recognizer = UILongPressGestureRecognizer(
             target: self,
@@ -94,6 +96,9 @@ class GhosttyTerminalView: UIView {
         recognizer.minimumPressDuration = 0.2
         recognizer.allowableMovement = 8
         recognizer.cancelsTouchesInView = true
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
         return recognizer
     }()
 
@@ -103,6 +108,21 @@ class GhosttyTerminalView: UIView {
             action: #selector(handleDoubleTap(_:))
         )
         recognizer.numberOfTapsRequired = 2
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
+        return recognizer
+    }()
+
+    private lazy var singleTapRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(
+            target: self,
+            action: #selector(handleSingleTap(_:))
+        )
+        recognizer.numberOfTapsRequired = 1
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
         return recognizer
     }()
 
@@ -112,6 +132,9 @@ class GhosttyTerminalView: UIView {
             action: #selector(handleTripleTap(_:))
         )
         recognizer.numberOfTapsRequired = 3
+        if #available(iOS 13.4, *) {
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        }
         return recognizer
     }()
 
@@ -120,7 +143,22 @@ class GhosttyTerminalView: UIView {
             target: self,
             action: #selector(handlePanGesture(_:))
         )
-        recognizer.maximumNumberOfTouches = 1
+        recognizer.maximumNumberOfTouches = 2
+        if #available(iOS 13.4, *) {
+            recognizer.allowedScrollTypesMask = [.continuous, .discrete]
+            recognizer.allowedTouchTypes = [
+                NSNumber(value: UITouch.TouchType.direct.rawValue),
+                NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
+            ]
+        }
+        return recognizer
+    }()
+
+    private lazy var hoverRecognizer: UIHoverGestureRecognizer = {
+        let recognizer = UIHoverGestureRecognizer(
+            target: self,
+            action: #selector(handleHoverGesture(_:))
+        )
         return recognizer
     }()
 
@@ -144,6 +182,11 @@ class GhosttyTerminalView: UIView {
     private var fallbackHardwarePressKeys: [UInt16: Ghostty.Input.Key] = [:]
     private var fallbackHardwarePressModifiers: [UInt16: UIKeyModifierFlags] = [:]
     private var systemTextInputPresses: Set<UInt16> = []
+    private var hardwareInsertTextSuppression = HardwareInsertTextSuppressionState()
+    private var hardwareModifierState = HardwareModifierState()
+    private var lastGhosttyHardwarePressAt: CFAbsoluteTime = 0
+    private let inputTraceEnabled = Foundation.ProcessInfo.processInfo.arguments.contains("--vvterm-input-trace")
+        || Foundation.ProcessInfo.processInfo.environment["VVTERM_INPUT_TRACE"] == "1"
 
     // MARK: - Rendering Components
 
@@ -174,6 +217,15 @@ class GhosttyTerminalView: UIView {
             ghostty_surface_refresh(surface)
             ghostty_surface_draw(surface)
             self.markIOSurfaceLayersForDisplay()
+        }
+    }
+
+    private func traceInput(_ message: String) {
+        guard inputTraceEnabled else { return }
+        let line = "InputTrace: \(message)"
+        Self.logger.info("\(line, privacy: .public)")
+        if let data = "\(line)\n".data(using: .utf8) {
+            FileHandle.standardError.write(data)
         }
     }
 
@@ -209,17 +261,26 @@ class GhosttyTerminalView: UIView {
         // Setup gesture recognizers with delegate for simultaneous recognition
         selectionRecognizer.delegate = self
         scrollRecognizer.delegate = self
+        hoverRecognizer.delegate = self
+        singleTapRecognizer.delegate = self
         doubleTapRecognizer.delegate = self
         tripleTapRecognizer.delegate = self
 
+        // Single tap should wait for multi-tap gestures to fail.
+        singleTapRecognizer.require(toFail: doubleTapRecognizer)
         // Triple tap should require double tap to fail first
         doubleTapRecognizer.require(toFail: tripleTapRecognizer)
 
         addGestureRecognizer(selectionRecognizer)
         addGestureRecognizer(scrollRecognizer)
+        addGestureRecognizer(hoverRecognizer)
+        addGestureRecognizer(singleTapRecognizer)
         addGestureRecognizer(doubleTapRecognizer)
         addGestureRecognizer(tripleTapRecognizer)
         isUserInteractionEnabled = true
+        if #available(iOS 13.4, *) {
+            addInteraction(UIPointerInteraction(delegate: self))
+        }
 
         // Setup edit menu interaction for copy/paste
         let interaction = UIEditMenuInteraction(delegate: self)
@@ -229,6 +290,8 @@ class GhosttyTerminalView: UIView {
         setupConfigReloadObservation()
         registerColorSchemeObserver()
         setupHardwareKeyboardObservation()
+        let startupArgs = Foundation.ProcessInfo.processInfo.arguments.joined(separator: " ")
+        traceInput("startup hasHardwareKeyboardAttached=\(hasHardwareKeyboardAttached) args='\(startupArgs)'")
     }
 
     required init?(coder: NSCoder) {
@@ -643,23 +706,92 @@ class GhosttyTerminalView: UIView {
 
     // MARK: - Touch Input
 
+    private func ghosttyButton(from buttonMask: UIEvent.ButtonMask) -> Ghostty.Input.MouseButton? {
+        if buttonMask.contains(.secondary) { return .right }
+        if buttonMask.contains(.primary) { return .left }
+        return nil
+    }
+
+    private func syncIndirectPointerButtons(
+        _ buttonMask: UIEvent.ButtonMask,
+        surface: Ghostty.Surface
+    ) {
+        let released = activeIndirectButtonMask.subtracting(buttonMask)
+        let pressed = buttonMask.subtracting(activeIndirectButtonMask)
+
+        for candidate in [UIEvent.ButtonMask.primary, .secondary] {
+            if released.contains(candidate), let button = ghosttyButton(from: candidate) {
+                surface.sendMouseButton(.init(action: .release, button: button, mods: []))
+            }
+        }
+
+        for candidate in [UIEvent.ButtonMask.primary, .secondary] {
+            if pressed.contains(candidate), let button = ghosttyButton(from: candidate) {
+                surface.sendMouseButton(.init(action: .press, button: button, mods: []))
+            }
+        }
+
+        activeIndirectButtonMask = buttonMask
+    }
+
+    private func handleIndirectPointerTouch(
+        _ touches: Set<UITouch>,
+        event: UIEvent?
+    ) -> Bool {
+        guard let surface = surface else { return false }
+        guard let touch = touches.first(where: { $0.type == .indirectPointer }) else { return false }
+
+        let pos = ghosttyPoint(touch.location(in: self))
+        surface.sendMousePos(.init(x: pos.x, y: pos.y, mods: []))
+
+        let buttonMask = event?.buttonMask ?? activeIndirectButtonMask
+
+        switch touch.phase {
+        case .began, .moved, .stationary:
+            syncIndirectPointerButtons(buttonMask, surface: surface)
+        case .ended, .cancelled:
+            syncIndirectPointerButtons([], surface: surface)
+        default:
+            break
+        }
+
+        if touch.phase == .ended || touch.phase == .cancelled {
+            if let allTouches = event?.allTouches {
+                let stillHovering = allTouches.contains {
+                    $0 != touch && $0.type == .indirectPointer && $0.phase != .ended && $0.phase != .cancelled
+                }
+                if !stillHovering {
+                    surface.sendMousePos(.init(x: -1, y: -1, mods: []))
+                }
+            } else {
+                surface.sendMousePos(.init(x: -1, y: -1, mods: []))
+            }
+        }
+
+        requestRender()
+        return true
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
-        // Tap just focuses keyboard - no mouse events (avoids accidental selection)
+        // Keep keyboard focus eager; click forwarding is handled by singleTapRecognizer.
         _ = becomeFirstResponder()
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        // Pan gesture handles scrolling, long press handles selection
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
+        _ = handleIndirectPointerTouch(touches, event: event)
     }
 
     private func ghosttyPoint(_ location: CGPoint) -> CGPoint {
@@ -682,6 +814,23 @@ class GhosttyTerminalView: UIView {
     private var momentumDisplayLink: CADisplayLink?
     private var momentumVelocity: CGPoint = .zero
     private var momentumPhase: Ghostty.Input.Momentum = .none
+
+    @objc private func handleHoverGesture(_ recognizer: UIHoverGestureRecognizer) {
+        guard let surface = surface else { return }
+        let location = recognizer.location(in: self)
+
+        switch recognizer.state {
+        case .began, .changed:
+            let pos = ghosttyPoint(location)
+            surface.sendMousePos(.init(x: pos.x, y: pos.y, mods: []))
+            requestRender()
+        case .ended, .cancelled:
+            surface.sendMousePos(.init(x: -1, y: -1, mods: []))
+            requestRender()
+        default:
+            break
+        }
+    }
 
     @objc private func handlePanGesture(_ recognizer: UIPanGestureRecognizer) {
         guard let surface = surface else { return }
@@ -792,6 +941,25 @@ class GhosttyTerminalView: UIView {
 
     // MARK: - Selection Gestures
 
+    /// Single tap sends a click to the terminal so TUIs can react to touch as mouse input.
+    @objc private func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
+        guard let surface = surface else {
+            _ = becomeFirstResponder()
+            return
+        }
+        if isSelecting || isScrolling { return }
+
+        let location = recognizer.location(in: self)
+        let pos = ghosttyPoint(location)
+
+        _ = becomeFirstResponder()
+
+        surface.sendMousePos(.init(x: pos.x, y: pos.y, mods: []))
+        surface.sendMouseButton(.init(action: .press, button: .left, mods: []))
+        surface.sendMouseButton(.init(action: .release, button: .left, mods: []))
+        requestRender()
+    }
+
     /// Double-tap to select word
     @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
         guard let surface = surface else { return }
@@ -900,8 +1068,8 @@ class GhosttyTerminalView: UIView {
         return nil
     }
 
-    private func handleCommandShortcut(_ key: UIKey) -> Bool {
-        guard key.modifierFlags.contains(.command) else { return false }
+    private func handleCommandShortcut(_ key: UIKey, modifiers: UIKeyModifierFlags) -> Bool {
+        guard modifiers.contains(.command) else { return false }
         let input = key.charactersIgnoringModifiers.lowercased()
         switch input {
         case "v":
@@ -1021,14 +1189,14 @@ class GhosttyTerminalView: UIView {
         return nil
     }
 
-    private func startKeyRepeat(for key: UIKey) {
+    private func startKeyRepeat(for key: UIKey, modifiers: UIKeyModifierFlags) {
         guard shouldRepeatHardwareKey(key) else { return }
         let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
-        guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return }
+        guard modifiers.intersection(blockedModifiers).isEmpty else { return }
         stopKeyRepeat()
         repeatingHardwareKey = key
         repeatingFallbackKey = fallbackHardwareKey(for: key)
-        repeatingFallbackModifiers = key.modifierFlags
+        repeatingFallbackModifiers = modifiers
         repeatingKeyCode = UInt16(key.keyCode.rawValue)
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.35, repeating: 0.05)
@@ -1038,6 +1206,7 @@ class GhosttyTerminalView: UIView {
             if let repeatKey = self.repeatingHardwareKey,
                self.sendDirectHardwareKeyEvent(
                    repeatKey,
+                   modifiers: self.repeatingFallbackModifiers,
                    action: GHOSTTY_ACTION_REPEAT,
                    surface: cSurface
                ) {
@@ -1108,26 +1277,46 @@ class GhosttyTerminalView: UIView {
 
     private func sendDirectHardwareKeyEvent(
         _ key: UIKey,
+        modifiers: UIKeyModifierFlags,
         action: ghostty_input_action_e,
         surface cSurface: ghostty_surface_t
     ) -> Bool {
-        guard let event = Ghostty.Input.KeyEvent(uiKey: key, action: ghosttyInputAction(action))
-        else {
-            return false
-        }
-        return event.withCValue { cEvent in
+        let descriptor = Ghostty.Input.HardwareKeyDescriptor(
+            keyCode: key.keyCode,
+            modifierFlags: modifiers,
+            characters: key.characters,
+            charactersIgnoringModifiers: key.charactersIgnoringModifiers
+        )
+        let dispatched = Ghostty.Input.KeyEvent.dispatchHardwareKey(
+            descriptor,
+            action: ghosttyInputAction(action)
+        ) { cEvent in
             ghostty_surface_key(cSurface, cEvent)
         }
+        traceInput(
+            "sendDirectHardwareKeyEvent action=\(action.rawValue) keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' reportedMods=\(key.modifierFlags.rawValue) effectiveMods=\(modifiers.rawValue) dispatched=\(dispatched)"
+        )
+        return dispatched
     }
 
-    private func shouldRoutePressToSystemTextInput(_ key: UIKey) -> Bool {
+    private func shouldRoutePressToSystemTextInput(_ key: UIKey, modifiers: UIKeyModifierFlags) -> Bool {
         let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
-        guard key.modifierFlags.intersection(blockedModifiers).isEmpty else { return false }
+        guard modifiers.intersection(blockedModifiers).isEmpty else { return false }
         if hasActiveIMEComposition { return true }
         if fallbackHardwareKey(for: key) != nil { return false }
         // Route only keys that can't be represented directly. Most hardware keys
         // must go through ghostty_surface_key (not insertText) for TUI correctness.
         return key.characters.isEmpty && key.charactersIgnoringModifiers.isEmpty
+    }
+
+    private func queueHardwareInsertTextSuppressionIfNeeded(for key: UIKey, modifiers: UIKeyModifierFlags) {
+        guard !hasActiveIMEComposition else { return }
+        let blockedModifiers: UIKeyModifierFlags = [.command, .control, .alternate]
+        guard modifiers.intersection(blockedModifiers).isEmpty else { return }
+        let text = key.characters.precomposedStringWithCanonicalMapping
+        guard !text.isEmpty, !text.hasPrefix("UIKeyInput") else { return }
+        hardwareInsertTextSuppression.queue(text)
+        traceInput("queueSuppress text='\(text)' keyCode=\(key.keyCode.rawValue)")
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -1144,35 +1333,63 @@ class GhosttyTerminalView: UIView {
                 forwardedToSystem.insert(press)
                 continue
             }
+            let keyCode = UInt16(key.keyCode.rawValue)
+            hardwareModifierState.handlePressBegan(keyCode: keyCode)
+            var effectiveModifiers = hardwareModifierState.effectiveModifiers(reported: key.modifierFlags)
+            if effectiveModifiers.intersection([.control, .alternate]).isEmpty,
+               let toolbarModifiers = keyboardToolbar?.consumeModifierFlags(),
+               !toolbarModifiers.isEmpty {
+                effectiveModifiers.formUnion(toolbarModifiers)
+                traceInput(
+                    "pressesBegan mergedToolbarModifiers keyCode=\(key.keyCode.rawValue) toolbarMods=\(toolbarModifiers.rawValue)"
+                )
+            }
+            traceInput(
+                "pressesBegan keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' reportedMods=\(key.modifierFlags.rawValue) effectiveMods=\(effectiveModifiers.rawValue)"
+            )
             markHardwareKeyboardDetectedFromKeyPress()
-            if handleCommandShortcut(key) { continue }
-            if shouldRoutePressToSystemTextInput(key) {
-                systemTextInputPresses.insert(UInt16(key.keyCode.rawValue))
+            if handleCommandShortcut(key, modifiers: effectiveModifiers) { continue }
+            let routeToSystemTextInput = shouldRoutePressToSystemTextInput(key, modifiers: effectiveModifiers)
+            if routeToSystemTextInput {
+                systemTextInputPresses.insert(keyCode)
                 forwardedToSystem.insert(press)
+                traceInput("pressesBegan routeToSystemTextInput keyCode=\(key.keyCode.rawValue)")
                 continue
             }
 
-            let keyCode = UInt16(key.keyCode.rawValue)
-            if sendDirectHardwareKeyEvent(key, action: GHOSTTY_ACTION_PRESS, surface: cSurface) {
+            let directDispatched = sendDirectHardwareKeyEvent(
+                key,
+                modifiers: effectiveModifiers,
+                action: GHOSTTY_ACTION_PRESS,
+                surface: cSurface
+            )
+            if directDispatched {
                 hardwarePressesSentToGhostty.insert(keyCode)
                 fallbackHardwarePressKeys.removeValue(forKey: keyCode)
                 fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
-                startKeyRepeat(for: key)
+                lastGhosttyHardwarePressAt = CFAbsoluteTimeGetCurrent()
+                queueHardwareInsertTextSuppressionIfNeeded(for: key, modifiers: effectiveModifiers)
+                startKeyRepeat(for: key, modifiers: effectiveModifiers)
                 didHandleGhosttyInput = true
+                traceInput("pressesBegan directDispatched keyCode=\(key.keyCode.rawValue)")
             } else if let fallbackKey = fallbackHardwareKey(for: key) {
-                let keyCode = UInt16(key.keyCode.rawValue)
                 surface.sendKeyEvent(
                     fallbackHardwareEvent(
                         key: fallbackKey,
                         action: .press,
-                        modifiers: key.modifierFlags
+                        modifiers: effectiveModifiers
                     )
                 )
                 hardwarePressesSentToGhostty.insert(keyCode)
                 fallbackHardwarePressKeys[keyCode] = fallbackKey
-                fallbackHardwarePressModifiers[keyCode] = key.modifierFlags
-                startKeyRepeat(for: key)
+                fallbackHardwarePressModifiers[keyCode] = effectiveModifiers
+                lastGhosttyHardwarePressAt = CFAbsoluteTimeGetCurrent()
+                queueHardwareInsertTextSuppressionIfNeeded(for: key, modifiers: effectiveModifiers)
+                startKeyRepeat(for: key, modifiers: effectiveModifiers)
                 didHandleGhosttyInput = true
+                traceInput("pressesBegan fallbackDispatched keyCode=\(key.keyCode.rawValue)")
+            } else {
+                traceInput("pressesBegan notDispatched keyCode=\(key.keyCode.rawValue)")
             }
         }
 
@@ -1200,11 +1417,17 @@ class GhosttyTerminalView: UIView {
                 continue
             }
             let keyCode = UInt16(key.keyCode.rawValue)
+            let effectiveModifiers = hardwareModifierState.effectiveModifiers(reported: key.modifierFlags)
+            traceInput(
+                "pressesEnded keyCode=\(key.keyCode.rawValue) chars='\(key.characters)' charsIgnoring='\(key.charactersIgnoringModifiers)' reportedMods=\(key.modifierFlags.rawValue) effectiveMods=\(effectiveModifiers.rawValue)"
+            )
             guard hardwarePressesSentToGhostty.contains(keyCode) else {
                 fallbackHardwarePressKeys.removeValue(forKey: keyCode)
                 fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
                 systemTextInputPresses.remove(keyCode)
+                hardwareModifierState.handlePressEnded(keyCode: keyCode)
                 forwardedToSystem.insert(press)
+                traceInput("pressesEnded forwardedToSystem keyCode=\(key.keyCode.rawValue)")
                 continue
             }
             hardwarePressesSentToGhostty.remove(keyCode)
@@ -1213,10 +1436,16 @@ class GhosttyTerminalView: UIView {
             }
             let fallbackKey = fallbackHardwarePressKeys.removeValue(forKey: keyCode)
             let fallbackModifiers =
-                fallbackHardwarePressModifiers.removeValue(forKey: keyCode) ?? key.modifierFlags
+                fallbackHardwarePressModifiers.removeValue(forKey: keyCode) ?? effectiveModifiers
 
-            if sendDirectHardwareKeyEvent(key, action: GHOSTTY_ACTION_RELEASE, surface: cSurface) {
+            if sendDirectHardwareKeyEvent(
+                key,
+                modifiers: effectiveModifiers,
+                action: GHOSTTY_ACTION_RELEASE,
+                surface: cSurface
+            ) {
                 didHandleGhosttyInput = true
+                traceInput("pressesEnded directDispatched keyCode=\(key.keyCode.rawValue)")
             } else if let fallbackKey {
                 surface.sendKeyEvent(
                     fallbackHardwareEvent(
@@ -1226,7 +1455,9 @@ class GhosttyTerminalView: UIView {
                     )
                 )
                 didHandleGhosttyInput = true
+                traceInput("pressesEnded fallbackDispatched keyCode=\(key.keyCode.rawValue)")
             }
+            hardwareModifierState.handlePressEnded(keyCode: keyCode)
         }
 
         if !forwardedToSystem.isEmpty {
@@ -1247,7 +1478,9 @@ class GhosttyTerminalView: UIView {
             fallbackHardwarePressKeys.removeValue(forKey: keyCode)
             fallbackHardwarePressModifiers.removeValue(forKey: keyCode)
             systemTextInputPresses.remove(keyCode)
+            hardwareModifierState.handlePressEnded(keyCode: keyCode)
         }
+        hardwareModifierState.reset()
         stopKeyRepeat()
     }
 
@@ -1267,11 +1500,20 @@ class GhosttyTerminalView: UIView {
     }
 
     private func sendControlByte(_ value: UInt8) {
-        let scalar = UnicodeScalar(value)
-        sendText(String(Character(scalar)))
+        sendRawInputData(Data([value]))
     }
 
     private func sendAnsiSequence(_ data: Data) {
+        sendRawInputData(data)
+    }
+
+    private func sendRawInputData(_ data: Data) {
+        guard !data.isEmpty else { return }
+        if let writeCallback {
+            writeCallback(data)
+            requestRender()
+            return
+        }
         let text = String(decoding: data, as: UTF8.self)
         sendText(text)
     }
@@ -1322,15 +1564,7 @@ class GhosttyTerminalView: UIView {
     }
 
     private func sendControlShortcut(_ char: Character) {
-        let lower = String(char).lowercased()
-        if let key = Ghostty.Input.Key(rawValue: lower) {
-            let codepoint = lower.unicodeScalars.first?.value ?? 0
-            sendModifiedKey(key, mods: [.ctrl], text: lower, unshiftedCodepoint: codepoint)
-            return
-        }
-        if let controlChar = TerminalControlKey.controlCharacter(for: char) {
-            sendText(String(controlChar))
-        }
+        sendControlKey(char)
     }
 
     private func sendTextKeyEvent(_ text: String) {
@@ -1382,8 +1616,9 @@ class GhosttyTerminalView: UIView {
     /// Send control key combination (e.g., Ctrl+C)
     func sendControlKey(_ char: Character) {
         guard surface != nil else { return }
-        if let controlChar = TerminalControlKey.controlCharacter(for: char) {
-            sendText(String(controlChar))
+        if let controlChar = TerminalControlKey.controlCharacter(for: char),
+           let ascii = controlChar.asciiValue {
+            sendControlByte(ascii)
         }
     }
 
@@ -1522,6 +1757,17 @@ extension GhosttyTerminalView: UIGestureRecognizerDelegate {
             return otherGestureRecognizer.state == .began
         }
         return false
+    }
+}
+
+@available(iOS 13.4, *)
+extension GhosttyTerminalView: UIPointerInteractionDelegate {
+    func pointerInteraction(
+        _ interaction: UIPointerInteraction,
+        regionFor request: UIPointerRegionRequest,
+        defaultRegion: UIPointerRegion
+    ) -> UIPointerRegion? {
+        defaultRegion
     }
 }
 
@@ -2428,6 +2674,24 @@ private class TerminalInputAccessoryView: UIInputView {
         return (ctrl, alt, shift)
     }
 
+    func consumeModifierFlags() -> UIKeyModifierFlags {
+        let consumed = consumeModifiers()
+        var flags: UIKeyModifierFlags = []
+        if consumed.ctrl {
+            flags.insert(.control)
+        }
+        if consumed.alt {
+            flags.insert(.alternate)
+        }
+        return flags
+    }
+
+    func setModifiersForTesting(ctrl: Bool, alt: Bool) {
+        ctrlActive = ctrl
+        altActive = alt
+        updateModifierState()
+    }
+
     private func updateModifierState() {
         UIView.animate(withDuration: 0.2) {
             self.updateModifierButton(self.ctrlButton, isActive: self.ctrlActive)
@@ -2494,9 +2758,51 @@ private final class RepeatableKeyButton: UIButton {
 extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
     var hasText: Bool { true }
 
+    func harnessInjectSoftwareCtrlSequence(primary: String, followup: String) {
+        guard primary.count == 1, followup.count == 1 else { return }
+        if keyboardToolbar == nil {
+            _ = inputAccessoryView
+        }
+        guard keyboardToolbar != nil else {
+            // Test fallback when no software keyboard toolbar exists in simulator automation.
+            sendModifiedKey(.t, mods: [.ctrl], text: "t", unshiftedCodepoint: 116)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                self?.insertText(followup)
+            }
+            return
+        }
+        keyboardToolbar?.setModifiersForTesting(ctrl: true, alt: false)
+        traceInput("harnessInjectSoftwareCtrlSequence primary='\(primary)' followup='\(followup)'")
+        insertText(primary)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.insertText(followup)
+        }
+    }
+
     func insertText(_ text: String) {
         let text = text.precomposedStringWithCanonicalMapping
         if text.hasPrefix("UIKeyInput") {
+            return
+        }
+        traceInput(
+            "insertText text='\(text)' hasHardware=\(hasHardwareKeyboardAttached) ime=\(hasActiveIMEComposition) systemTextInputPresses=\(systemTextInputPresses.count)"
+        )
+        let now = CFAbsoluteTimeGetCurrent()
+        // Hardware key presses are sent via ghostty_surface_key; suppress duplicate
+        // insertText payloads that can leak printable text into TUIs (e.g. zellij modes).
+        let suppressionQueued = !hasActiveIMEComposition
+            && systemTextInputPresses.isEmpty
+            && hardwareInsertTextSuppression.shouldSuppress(text, now: now)
+        let suppressionFallback = GhosttyHardwareInsertTextPolicy.shouldSuppressFallbackInsertText(
+            text: text,
+            hasActiveIMEComposition: hasActiveIMEComposition,
+            systemTextInputPressesCount: systemTextInputPresses.count,
+            now: now,
+            lastGhosttyHardwarePressAt: lastGhosttyHardwarePressAt
+        )
+        if suppressionQueued || suppressionFallback {
+            let reason = suppressionQueued ? "queue" : "recentHardwareFallback"
+            traceInput("insertText suppressed text='\(text)' reason=\(reason)")
             return
         }
         if hasActiveIMEComposition {
@@ -2511,6 +2817,17 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
             let mods = toolbar.consumeModifiers()
             if mods.ctrl || mods.alt {
                 if let firstChar = text.first {
+                    if let controlSequence = TerminalSoftwareModifierEncoder.encodeControlSequence(
+                        char: firstChar,
+                        ctrl: mods.ctrl,
+                        alt: mods.alt
+                    ) {
+                        sendAnsiSequence(controlSequence)
+                        if text.count > 1 {
+                            sendText(String(text.dropFirst()))
+                        }
+                        return
+                    }
                     let lower = String(firstChar).lowercased()
                     if let key = Ghostty.Input.Key(rawValue: lower) {
                         var ghostMods: Ghostty.Input.Mods = []
@@ -2558,6 +2875,16 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
         if normalized.contains("\n") {
             sendText(normalized.replacingOccurrences(of: "\n", with: "\r"))
             moveTextInputCursor(by: normalized.utf16.count)
+            return
+        }
+
+        if let mappedCharacter = TerminalSoftwareCharacterMapper.mapSingleCharacter(text) {
+            sendModifiedKey(
+                mappedCharacter.key,
+                mods: [],
+                text: mappedCharacter.text,
+                unshiftedCodepoint: mappedCharacter.unshiftedCodepoint
+            )
             return
         }
 

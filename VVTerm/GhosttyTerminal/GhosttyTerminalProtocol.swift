@@ -69,3 +69,40 @@ enum TerminalControlKey {
         return nil
     }
 }
+
+/// Utility for encoding software-keyboard modifier combinations in a TUI-compatible form.
+enum TerminalSoftwareModifierEncoder {
+    /// Encodes Ctrl/Alt + printable key as ANSI bytes when that combination has
+    /// a canonical control-byte representation (e.g. Ctrl+T => 0x14).
+    static func encodeControlSequence(char: Character, ctrl: Bool, alt: Bool) -> Data? {
+        guard ctrl else { return nil }
+        guard let controlChar = TerminalControlKey.controlCharacter(for: char) else { return nil }
+        var data = Data()
+        if alt {
+            data.append(0x1B)
+        }
+        data.append(contentsOf: String(controlChar).utf8)
+        return data
+    }
+}
+
+/// Mapping helper for software-keyboard characters sent through `insertText`.
+/// Preserves the original typed character while still providing an unshifted key identity.
+enum TerminalSoftwareCharacterMapper {
+    struct MappedCharacter: Equatable {
+        let key: Ghostty.Input.Key
+        let text: String
+        let unshiftedCodepoint: UInt32
+    }
+
+    static func mapSingleCharacter(_ text: String) -> MappedCharacter? {
+        guard text.count == 1, let scalar = text.unicodeScalars.first else { return nil }
+
+        let typedText = String(Character(scalar))
+        let keyRaw = typedText.lowercased()
+        guard let key = Ghostty.Input.Key(rawValue: keyRaw) else { return nil }
+
+        let unshiftedCodepoint = keyRaw.unicodeScalars.first?.value ?? scalar.value
+        return MappedCharacter(key: key, text: typedText, unshiftedCodepoint: unshiftedCodepoint)
+    }
+}
