@@ -12,6 +12,9 @@ class SpeechRecognitionService: ObservableObject {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
 
+    private var stopContinuation: CheckedContinuation<String, Never>?
+    private var stopTimeoutTask: Task<Void, Never>?
+
     init() {
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     }
@@ -27,34 +30,38 @@ class SpeechRecognitionService: ObservableObject {
             throw SpeechRecognitionError.recognitionUnavailable
         }
 
+        resolveStopContinuationIfNeeded(with: bestAvailableTranscription())
+        stopTimeoutTask?.cancel()
+        stopTimeoutTask = nil
+
         recognitionRequest?.endAudio()
         recognitionRequest = nil
 
         recognitionTask?.cancel()
         recognitionTask = nil
 
-        let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        self.recognitionRequest = recognitionRequest
-        recognitionRequest.shouldReportPartialResults = true
-        recognitionRequest.requiresOnDeviceRecognition = false
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        recognitionRequest = request
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = false
 
-        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+        recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self = self else { return }
 
-            if let result = result {
-                let transcription = result.bestTranscription.formattedString
-
-                Task { @MainActor in
+            Task { @MainActor in
+                if let result {
+                    let transcription = result.bestTranscription.formattedString
                     if result.isFinal {
                         self.transcribedText = transcription
-                    } else {
-                        self.partialTranscription = transcription
+                        self.completeRecognition(with: transcription)
+                        return
                     }
+                    self.partialTranscription = transcription
                 }
-            }
 
-            if error != nil || result?.isFinal == true {
-                // No audio engine to stop here; AudioCaptureService handles input
+                if error != nil {
+                    self.completeRecognition(with: self.bestAvailableTranscription())
+                }
             }
         }
     }
@@ -63,18 +70,31 @@ class SpeechRecognitionService: ObservableObject {
         recognitionRequest?.append(buffer)
     }
 
-    func stopRecognition() async -> String {
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
+    func stopRecognition(timeout: Duration = .seconds(2)) async -> String {
+        guard recognitionRequest != nil || recognitionTask != nil else {
+            return bestAvailableTranscription()
+        }
 
-        recognitionRequest = nil
-        recognitionTask = nil
+        return await withCheckedContinuation { continuation in
+            if stopContinuation != nil {
+                continuation.resume(returning: bestAvailableTranscription())
+                return
+            }
 
-        // Wait for final transcription
-        try? await Task.sleep(for: .milliseconds(500))
+            stopContinuation = continuation
+            recognitionRequest?.endAudio()
 
-        let finalText = transcribedText.isEmpty ? partialTranscription : transcribedText
-        return finalText
+            stopTimeoutTask?.cancel()
+            stopTimeoutTask = Task { [weak self] in
+                guard let self else { return }
+                try? await Task.sleep(for: timeout)
+                await MainActor.run {
+                    guard self.stopContinuation != nil else { return }
+                    self.recognitionTask?.cancel()
+                    self.completeRecognition(with: self.bestAvailableTranscription())
+                }
+            }
+        }
     }
 
     func transcribe(samples: [Float], sampleRate: Double) async throws -> String {
@@ -142,8 +162,7 @@ class SpeechRecognitionService: ObservableObject {
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
 
-        recognitionRequest = nil
-        recognitionTask = nil
+        completeRecognition(with: bestAvailableTranscription())
 
         transcribedText = ""
         partialTranscription = ""
@@ -152,6 +171,29 @@ class SpeechRecognitionService: ObservableObject {
     func resetTranscriptions() {
         transcribedText = ""
         partialTranscription = ""
+    }
+
+    private func completeRecognition(with text: String) {
+        stopTimeoutTask?.cancel()
+        stopTimeoutTask = nil
+        resolveStopContinuationIfNeeded(with: text)
+        recognitionRequest = nil
+        recognitionTask = nil
+    }
+
+    private func resolveStopContinuationIfNeeded(with text: String) {
+        guard let continuation = stopContinuation else { return }
+        stopContinuation = nil
+        continuation.resume(returning: text)
+    }
+
+    private func bestAvailableTranscription() -> String {
+        let primary = transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !primary.isEmpty {
+            return primary
+        }
+
+        return partialTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Errors

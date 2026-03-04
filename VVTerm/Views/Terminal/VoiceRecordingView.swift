@@ -8,6 +8,9 @@
 import SwiftUI
 
 struct VoiceRecordingView: View {
+    private static let transcriptionPreviewMaxHeight: CGFloat = 160
+    private static let bottomAnchorID = "voice-recording-preview-bottom-anchor"
+
     @ObservedObject var audioService: AudioService
     let onSend: (String) -> Void
     let onCancel: () -> Void
@@ -27,16 +30,8 @@ struct VoiceRecordingView: View {
     private var recordingView: some View {
         VStack(spacing: 10) {
             // Transcription preview
-            if !audioService.partialTranscription.isEmpty || !audioService.transcribedText.isEmpty {
-                Text(audioService.transcribedText.isEmpty ? audioService.partialTranscription : audioService.transcribedText)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
-                    .padding(.leading, 12)
-                    .padding(.trailing, 10)
-                    .padding(.bottom, 4)
+            if !transcriptionPreviewText.isEmpty {
+                transcriptionPreview
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
@@ -84,10 +79,9 @@ struct VoiceRecordingView: View {
                     isProcessing = true
                     Task {
                         let text = await audioService.stopRecording()
-                        let output = text.isEmpty ? audioService.partialTranscription : text
                         await MainActor.run {
                             isProcessing = false
-                            onSend(output)
+                            onSend(text)
                         }
                     }
                 } label: {
@@ -104,6 +98,52 @@ struct VoiceRecordingView: View {
             .frame(height: 46)
         }
         .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private var transcriptionPreview: some View {
+        if #available(iOS 17.0, macOS 14.0, *) {
+            ScrollView(.vertical) {
+                Text(transcriptionPreviewText)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+                    .padding(.leading, 12)
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 4)
+            }
+            .defaultScrollAnchor(.bottom)
+            .frame(maxHeight: Self.transcriptionPreviewMaxHeight)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(transcriptionPreviewText)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+                            .padding(.leading, 12)
+                            .padding(.trailing, 10)
+                            .padding(.bottom, 4)
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.bottomAnchorID)
+                    }
+                }
+                .frame(maxHeight: Self.transcriptionPreviewMaxHeight)
+                .onAppear {
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                }
+                .onChange(of: transcriptionPreviewText) { _ in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
+                }
+            }
+        }
     }
 
     private var processingView: some View {
@@ -128,6 +168,10 @@ struct VoiceRecordingView: View {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private var transcriptionPreviewText: String {
+        audioService.transcribedText.isEmpty ? audioService.partialTranscription : audioService.transcribedText
     }
 }
 

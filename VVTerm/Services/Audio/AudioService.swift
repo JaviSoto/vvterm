@@ -20,10 +20,15 @@ class AudioService: NSObject, ObservableObject {
     private let mlxParakeetProvider = MLXParakeetProvider.shared
 
     private var activeProvider: TranscriptionProvider = .system
+    private var idleTimerLease: IdleTimerLease?
 
     override init() {
         super.init()
         setupBindings()
+    }
+
+    deinit {
+        idleTimerLease = nil
     }
 
     // MARK: - Setup
@@ -61,6 +66,8 @@ class AudioService: NSObject, ObservableObject {
     // MARK: - Recording Control
 
     func startRecording() async throws {
+        idleTimerLease = nil
+
         let requestedProvider = TranscriptionSettingsStore.currentProvider()
         let effectiveProvider = resolveProvider(for: requestedProvider)
         if requestedProvider == .mlxWhisper && effectiveProvider == .system {
@@ -92,18 +99,21 @@ class AudioService: NSObject, ObservableObject {
         }
 
         isRecording = true
+        idleTimerLease = IdleTimerLeaseManager.shared.acquire()
     }
 
     func stopRecording() async -> String {
         isRecording = false
+        defer { idleTimerLease = nil }
 
         let samples = audioCaptureService.stop()
 
         switch activeProvider {
         case .system:
             let finalText = await speechRecognitionService.stopRecognition()
+            let output = finalText.isEmpty ? speechRecognitionService.partialTranscription : finalText
             speechRecognitionService.resetTranscriptions()
-            return finalText
+            return output
         case .mlxWhisper:
             do {
                 let text = try await mlxWhisperProvider.transcribe(samples: samples)
@@ -135,6 +145,7 @@ class AudioService: NSObject, ObservableObject {
 
     func cancelRecording() {
         isRecording = false
+        idleTimerLease = nil
 
         audioCaptureService.cancel()
         speechRecognitionService.cancelRecognition()

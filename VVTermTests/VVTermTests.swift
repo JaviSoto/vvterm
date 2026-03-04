@@ -89,3 +89,48 @@ struct ServerMoveSupportTests {
         #expect(resolved.id == ServerEnvironment.production.id)
     }
 }
+
+@MainActor
+struct VVTermTests {
+    @Test
+    func idleTimerLeaseTogglesWithLiveTokens() {
+        var observedStates: [Bool] = []
+        let manager = IdleTimerLeaseManager(setIdleTimerDisabled: { observedStates.append($0) })
+
+        #expect(observedStates.isEmpty)
+
+        let leaseA = manager.acquire()
+        #expect(observedStates == [true])
+        #expect(manager.activeTokenCount == 1)
+
+        let leaseB = manager.acquire()
+        #expect(observedStates == [true])
+        #expect(manager.activeTokenCount == 2)
+
+        leaseA.invalidate()
+        #expect(observedStates == [true])
+        #expect(manager.activeTokenCount == 1)
+
+        leaseB.invalidate()
+        #expect(observedStates == [true, false])
+        #expect(manager.activeTokenCount == 0)
+    }
+
+    @Test
+    func replacingLeaseReferenceAutoReleasesPreviousToken() {
+        var observedStates: [Bool] = []
+        let manager = IdleTimerLeaseManager(setIdleTimerDisabled: { observedStates.append($0) })
+
+        var currentLease: IdleTimerLease? = manager.acquire()
+        #expect(manager.activeTokenCount == 1)
+        #expect(observedStates == [true])
+
+        currentLease = manager.acquire()
+        #expect(manager.activeTokenCount == 1)
+        #expect(observedStates == [true])
+
+        currentLease = nil
+        #expect(manager.activeTokenCount == 0)
+        #expect(observedStates == [true, false])
+    }
+}
