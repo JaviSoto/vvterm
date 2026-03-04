@@ -8,6 +8,12 @@
 import SwiftUI
 
 struct VoiceRecordingView: View {
+    private static let transcriptionPreviewMaxHeight: CGFloat = 160
+    private static let transcriptionPreviewMinHeight: CGFloat = 34
+    private static let transcriptionPreviewLineHeight: CGFloat = 15
+    private static let transcriptionPreviewWrapCharacterEstimate: CGFloat = 42
+    private static let bottomAnchorID = "voice-recording-preview-bottom-anchor"
+
     @ObservedObject var audioService: AudioService
     let onStop: () -> Void
     let onCancel: () -> Void
@@ -32,15 +38,8 @@ struct VoiceRecordingView: View {
 
     private var recordingView: some View {
         VStack(spacing: 10) {
-            if !audioService.partialTranscription.isEmpty || !audioService.transcribedText.isEmpty {
-                Text(audioService.transcribedText.isEmpty ? audioService.partialTranscription : audioService.transcribedText)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .voiceGlassRect(tint: .accentColor, cornerRadius: 18)
+            if !transcriptionPreviewText.isEmpty {
+                transcriptionPreview
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
@@ -88,6 +87,91 @@ struct VoiceRecordingView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var transcriptionPreview: some View {
+        Group {
+            if transcriptionPreviewRequiresScroll {
+                scrollableTranscriptionPreview
+            } else {
+                plainTranscriptionPreview
+            }
+        }
+        .frame(height: transcriptionPreviewHeight, alignment: .bottom)
+        .voiceGlassRect(tint: .accentColor, cornerRadius: 18)
+    }
+
+    private var plainTranscriptionPreview: some View {
+        transcriptionPreviewLabel
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+    }
+
+    @ViewBuilder
+    private var scrollableTranscriptionPreview: some View {
+        if #available(iOS 17.0, macOS 14.0, *) {
+            ScrollView(.vertical, showsIndicators: false) {
+                transcriptionPreviewLabel
+            }
+            .defaultScrollAnchor(.bottom)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        transcriptionPreviewLabel
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.bottomAnchorID)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .onAppear {
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                }
+                .onChange(of: transcriptionPreviewText) { _ in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var transcriptionPreviewLabel: some View {
+        Text(transcriptionPreviewText)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Color.primary.opacity(0.82))
+            .multilineTextAlignment(.leading)
+            .lineSpacing(1.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+    }
+
+    private var estimatedPreviewLineCount: Int {
+        let logicalLines = transcriptionPreviewText.split(separator: "\n", omittingEmptySubsequences: false)
+        let estimated = logicalLines.reduce(0) { partialResult, line in
+            let characters = CGFloat(max(1, line.count))
+            let wrappedLines = Int(ceil(characters / Self.transcriptionPreviewWrapCharacterEstimate))
+            return partialResult + max(1, wrappedLines)
+        }
+        return max(1, estimated)
+    }
+
+    private var transcriptionPreviewHeight: CGFloat {
+        let textHeight = CGFloat(estimatedPreviewLineCount) * Self.transcriptionPreviewLineHeight
+        let paddedHeight = textHeight + 14
+        return min(Self.transcriptionPreviewMaxHeight, max(Self.transcriptionPreviewMinHeight, paddedHeight))
+    }
+
+    private var transcriptionPreviewRequiresScroll: Bool {
+        transcriptionPreviewHeight >= (Self.transcriptionPreviewMaxHeight - 0.5)
+    }
+
+    private var transcriptionPreviewText: String {
+        audioService.transcribedText.isEmpty ? audioService.partialTranscription : audioService.transcribedText
     }
 
     private var processingView: some View {
