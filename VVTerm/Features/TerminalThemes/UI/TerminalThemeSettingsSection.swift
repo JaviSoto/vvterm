@@ -4,6 +4,10 @@ struct TerminalThemeSettingsSection: View {
     @EnvironmentObject private var terminalThemeManager: TerminalThemeManager
 
     @State private var customThemeErrorMessage: String?
+    #if os(iOS)
+    @State private var activeThemePicker: TerminalThemePickerContext?
+    @State private var pendingThemeSelection = ""
+    #endif
     #if os(macOS)
     @State private var showingCustomThemeManager = false
     #endif
@@ -91,6 +95,10 @@ struct TerminalThemeSettingsSection: View {
             )
 
             if themeSelection.usePerAppearanceTheme {
+                #if os(iOS)
+                themePickerRow(.darkTheme)
+                themePickerRow(.lightTheme)
+                #else
                 Picker("Dark Theme", selection: darkThemeNameBinding) {
                     themePickerRows
                 }
@@ -100,15 +108,34 @@ struct TerminalThemeSettingsSection: View {
                     themePickerRows
                 }
                 .disabled(allThemeNames.isEmpty)
+                #endif
             } else {
+                #if os(iOS)
+                themePickerRow(.singleTheme)
+                #else
                 Picker("Theme", selection: darkThemeNameBinding) {
                     themePickerRows
                 }
                 .disabled(allThemeNames.isEmpty)
+                #endif
             }
 
             customThemesControl
         }
+        #if os(iOS)
+        .sheet(item: $activeThemePicker) { context in
+            NavigationStack {
+                TerminalThemePickerScreen(
+                    title: context.title,
+                    selectedTheme: $pendingThemeSelection,
+                    builtInThemeOptions: builtInThemeOptions,
+                    customThemeOptions: customThemeOptions,
+                    onCancel: { activeThemePicker = nil },
+                    onApply: applyThemePickerSelection
+                )
+            }
+        }
+        #endif
         #if os(macOS)
         .sheet(isPresented: $showingCustomThemeManager) {
             customThemesManager {
@@ -123,6 +150,49 @@ struct TerminalThemeSettingsSection: View {
             Text(customThemeErrorMessage ?? "")
         }
     }
+
+    #if os(iOS)
+    private func themePickerRow(_ context: TerminalThemePickerContext) -> some View {
+        Button {
+            pendingThemeSelection = selectedTheme(for: context)
+            activeThemePicker = context
+        } label: {
+            HStack {
+                Text(context.title)
+                Spacer(minLength: 0)
+                Text(selectedTheme(for: context))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(allThemeNames.isEmpty)
+    }
+
+    private func selectedTheme(for context: TerminalThemePickerContext) -> String {
+        switch context {
+        case .singleTheme, .darkTheme:
+            themeSelection.darkThemeName
+        case .lightTheme:
+            themeSelection.lightThemeName
+        }
+    }
+
+    private func applyThemePickerSelection() {
+        guard let context = activeThemePicker else { return }
+        let target: TerminalThemeSelectionTarget = switch context {
+        case .singleTheme, .darkTheme:
+            .dark
+        case .lightTheme:
+            .light
+        }
+        terminalThemeManager.selectTheme(named: pendingThemeSelection, for: target)
+        activeThemePicker = nil
+    }
+    #endif
 
     @ViewBuilder
     private var customThemesControl: some View {
