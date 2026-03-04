@@ -31,6 +31,25 @@ private struct PendingCustomThemeSource: Identifiable {
     var content: String
 }
 
+private enum ThemePickerContext: String, Identifiable {
+    case singleTheme
+    case darkTheme
+    case lightTheme
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .singleTheme:
+            return String(localized: "Theme")
+        case .darkTheme:
+            return String(localized: "Dark Mode Theme")
+        case .lightTheme:
+            return String(localized: "Light Mode Theme")
+        }
+    }
+}
+
 // MARK: - Terminal Settings View
 
 struct TerminalSettingsView: View {
@@ -66,6 +85,8 @@ struct TerminalSettingsView: View {
     @State private var builtInThemeNames: [String] = []
     @State private var customThemeErrorMessage: String?
     @State private var showingCustomThemeManager = false
+    @State private var activeThemePicker: ThemePickerContext?
+    @State private var pendingThemeSelection = ""
 
     private var builtInThemeOptions: [String] {
         Set(builtInThemeNames)
@@ -116,26 +137,47 @@ struct TerminalSettingsView: View {
         )
     }
 
-    private func themePickerLink(_ label: String, selection: Binding<String>) -> some View {
-        NavigationLink {
-            ThemePickerScreen(
-                title: label,
-                selectedTheme: selection,
-                builtInThemeOptions: builtInThemeOptions,
-                customThemeOptions: customThemeOptions
-            )
+    private func themePickerRow(_ context: ThemePickerContext) -> some View {
+        Button {
+            pendingThemeSelection = selectedTheme(for: context)
+            activeThemePicker = context
         } label: {
             HStack {
-                Text(label)
+                Text(context.title)
                 Spacer(minLength: 0)
-                Text(selection.wrappedValue)
+                Text(selectedTheme(for: context))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .disabled(allThemeNames.isEmpty)
+    }
+
+    private func selectedTheme(for context: ThemePickerContext) -> String {
+        switch context {
+        case .singleTheme, .darkTheme:
+            return themeName
+        case .lightTheme:
+            return themeNameLight
+        }
+    }
+
+    private func applyThemePickerSelection() {
+        guard let context = activeThemePicker else { return }
+
+        switch context {
+        case .singleTheme, .darkTheme:
+            themeName = pendingThemeSelection
+        case .lightTheme:
+            themeNameLight = pendingThemeSelection
+        }
+
+        ensureThemeSelectionIsValid()
+        activeThemePicker = nil
     }
 
     private var fontSection: some View {
@@ -165,10 +207,10 @@ struct TerminalSettingsView: View {
             Toggle("Use different themes for Light/Dark mode", isOn: $usePerAppearanceTheme)
 
             if usePerAppearanceTheme {
-                themePickerLink("Dark Mode Theme", selection: $themeName)
-                themePickerLink("Light Mode Theme", selection: $themeNameLight)
+                themePickerRow(.darkTheme)
+                themePickerRow(.lightTheme)
             } else {
-                themePickerLink("Theme", selection: $themeName)
+                themePickerRow(.singleTheme)
             }
 
             HStack(spacing: 10) {
@@ -289,6 +331,18 @@ struct TerminalSettingsView: View {
             sshConnectionSection
         }
         .formStyle(.grouped)
+        .sheet(item: $activeThemePicker) { context in
+            NavigationStack {
+                ThemePickerScreen(
+                    title: context.title,
+                    selectedTheme: $pendingThemeSelection,
+                    builtInThemeOptions: builtInThemeOptions,
+                    customThemeOptions: customThemeOptions,
+                    onCancel: { activeThemePicker = nil },
+                    onApply: applyThemePickerSelection
+                )
+            }
+        }
         .sheet(isPresented: $showingCustomThemeManager) {
             ManageCustomThemesSheet(
                 customThemes: customThemes,
@@ -408,38 +462,55 @@ private struct ThemePickerScreen: View {
     @Binding var selectedTheme: String
     let builtInThemeOptions: [String]
     let customThemeOptions: [String]
+    let onCancel: () -> Void
+    let onApply: () -> Void
 
     var body: some View {
-        List {
-            Section {
-                ThemePickerTerminalPreview(themeName: selectedTheme)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
-            } header: {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Preview")
-            } footer: {
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ThemePickerTerminalPreview(themeName: selectedTheme)
                 Text("This sample uses each theme's background, text, cursor, selection, and ANSI palette colors.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .background(.regularMaterial)
 
-            if !builtInThemeOptions.isEmpty {
-                Section("Built-in") {
-                    ForEach(builtInThemeOptions, id: \.self) { theme in
-                        themeRow(theme)
+            List {
+                if !builtInThemeOptions.isEmpty {
+                    Section("Built-in") {
+                        ForEach(builtInThemeOptions, id: \.self) { theme in
+                            themeRow(theme)
+                        }
+                    }
+                }
+
+                if !customThemeOptions.isEmpty {
+                    Section("Custom") {
+                        ForEach(customThemeOptions, id: \.self) { theme in
+                            themeRow(theme)
+                        }
                     }
                 }
             }
-
-            if !customThemeOptions.isEmpty {
-                Section("Custom") {
-                    ForEach(customThemeOptions, id: \.self) { theme in
-                        themeRow(theme)
-                    }
-                }
-            }
+            .listStyle(.insetGrouped)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: onCancel)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Apply", action: onApply)
+                    .fontWeight(.semibold)
+            }
+        }
     }
 
     private func themeRow(_ theme: String) -> some View {
