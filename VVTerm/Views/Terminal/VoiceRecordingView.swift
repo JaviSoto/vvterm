@@ -9,6 +9,11 @@ import SwiftUI
 
 struct VoiceRecordingView: View {
     private static let transcriptionPreviewMaxHeight: CGFloat = 160
+    private static let transcriptionPreviewMinHeight: CGFloat = 34
+    private static let transcriptionPreviewLineHeight: CGFloat = 15
+    private static let transcriptionPreviewHorizontalPadding: CGFloat = 12
+    private static let transcriptionPreviewVerticalPadding: CGFloat = 7
+    private static let transcriptionPreviewWrapCharacterEstimate: CGFloat = 42
     private static let bottomAnchorID = "voice-recording-preview-bottom-anchor"
 
     @ObservedObject var audioService: AudioService
@@ -102,38 +107,48 @@ struct VoiceRecordingView: View {
 
     @ViewBuilder
     private var transcriptionPreview: some View {
+        Group {
+            if transcriptionPreviewRequiresScroll {
+                scrollableTranscriptionPreview
+            } else {
+                plainTranscriptionPreview
+            }
+        }
+        .frame(height: transcriptionPreviewHeight, alignment: .bottom)
+        .background(transcriptionPreviewBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .padding(.horizontal, 8)
+    }
+
+    private var plainTranscriptionPreview: some View {
+        transcriptionPreviewTextContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+    }
+
+    @ViewBuilder
+    private var scrollableTranscriptionPreview: some View {
         if #available(iOS 17.0, macOS 14.0, *) {
-            ScrollView(.vertical) {
-                Text(transcriptionPreviewText)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
-                    .padding(.leading, 12)
-                    .padding(.trailing, 10)
-                    .padding(.bottom, 4)
+            ScrollView(.vertical, showsIndicators: false) {
+                transcriptionPreviewTextContent
             }
             .defaultScrollAnchor(.bottom)
-            .frame(maxHeight: Self.transcriptionPreviewMaxHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         } else {
             ScrollViewReader { proxy in
-                ScrollView(.vertical) {
+                ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(transcriptionPreviewText)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
-                            .padding(.leading, 12)
-                            .padding(.trailing, 10)
-                            .padding(.bottom, 4)
+                        transcriptionPreviewTextContent
 
                         Color.clear
                             .frame(height: 1)
                             .id(Self.bottomAnchorID)
                     }
                 }
-                .frame(maxHeight: Self.transcriptionPreviewMaxHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 .onAppear {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
@@ -144,6 +159,42 @@ struct VoiceRecordingView: View {
                 }
             }
         }
+    }
+
+    private var transcriptionPreviewTextContent: some View {
+        Text(transcriptionPreviewText)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Color.primary.opacity(0.82))
+            .multilineTextAlignment(.leading)
+            .lineSpacing(1.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Self.transcriptionPreviewHorizontalPadding)
+            .padding(.vertical, Self.transcriptionPreviewVerticalPadding)
+    }
+
+    private var transcriptionPreviewBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.primary.opacity(0.06))
+    }
+
+    private var estimatedPreviewLineCount: Int {
+        let logicalLines = transcriptionPreviewText.split(separator: "\n", omittingEmptySubsequences: false)
+        let estimated = logicalLines.reduce(0) { partialResult, line in
+            let characters = CGFloat(max(1, line.count))
+            let wrappedLines = Int(ceil(characters / Self.transcriptionPreviewWrapCharacterEstimate))
+            return partialResult + max(1, wrappedLines)
+        }
+        return max(1, estimated)
+    }
+
+    private var transcriptionPreviewHeight: CGFloat {
+        let textHeight = CGFloat(estimatedPreviewLineCount) * Self.transcriptionPreviewLineHeight
+        let paddedHeight = textHeight + (Self.transcriptionPreviewVerticalPadding * 2)
+        return min(Self.transcriptionPreviewMaxHeight, max(Self.transcriptionPreviewMinHeight, paddedHeight))
+    }
+
+    private var transcriptionPreviewRequiresScroll: Bool {
+        transcriptionPreviewHeight >= (Self.transcriptionPreviewMaxHeight - 0.5)
     }
 
     private var processingView: some View {
