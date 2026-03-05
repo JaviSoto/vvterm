@@ -83,6 +83,11 @@ class GhosttyTerminalView: UIView {
     var scrollbar: Ghostty.Action.Scrollbar?
 
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "app.vivy.vvterm", category: "GhosttyTerminal")
+    private static let directTouchTypes: [NSNumber] = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+    private static let directAndPointerTouchTypes: [NSNumber] = [
+        NSNumber(value: UITouch.TouchType.direct.rawValue),
+        NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
+    ]
 
     private var isSelecting = false
     private var isScrolling = false
@@ -95,9 +100,7 @@ class GhosttyTerminalView: UIView {
         recognizer.minimumPressDuration = 0.2
         recognizer.allowableMovement = 8
         recognizer.cancelsTouchesInView = true
-        if #available(iOS 13.4, *) {
-            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        }
+        recognizer.allowedTouchTypes = Self.directTouchTypes
         return recognizer
     }()
 
@@ -107,9 +110,7 @@ class GhosttyTerminalView: UIView {
             action: #selector(handleDoubleTap(_:))
         )
         recognizer.numberOfTapsRequired = 2
-        if #available(iOS 13.4, *) {
-            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        }
+        recognizer.allowedTouchTypes = Self.directTouchTypes
         return recognizer
     }()
 
@@ -119,9 +120,7 @@ class GhosttyTerminalView: UIView {
             action: #selector(handleSingleTap(_:))
         )
         recognizer.numberOfTapsRequired = 1
-        if #available(iOS 13.4, *) {
-            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        }
+        recognizer.allowedTouchTypes = Self.directTouchTypes
         return recognizer
     }()
 
@@ -131,9 +130,7 @@ class GhosttyTerminalView: UIView {
             action: #selector(handleTripleTap(_:))
         )
         recognizer.numberOfTapsRequired = 3
-        if #available(iOS 13.4, *) {
-            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        }
+        recognizer.allowedTouchTypes = Self.directTouchTypes
         return recognizer
     }()
 
@@ -143,13 +140,8 @@ class GhosttyTerminalView: UIView {
             action: #selector(handlePanGesture(_:))
         )
         recognizer.maximumNumberOfTouches = 2
-        if #available(iOS 13.4, *) {
-            recognizer.allowedScrollTypesMask = [.continuous, .discrete]
-            recognizer.allowedTouchTypes = [
-                NSNumber(value: UITouch.TouchType.direct.rawValue),
-                NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
-            ]
-        }
+        recognizer.allowedScrollTypesMask = [.continuous, .discrete]
+        recognizer.allowedTouchTypes = Self.directAndPointerTouchTypes
         return recognizer
     }()
 
@@ -263,9 +255,7 @@ class GhosttyTerminalView: UIView {
         addGestureRecognizer(doubleTapRecognizer)
         addGestureRecognizer(tripleTapRecognizer)
         isUserInteractionEnabled = true
-        if #available(iOS 13.4, *) {
-            addInteraction(UIPointerInteraction(delegate: self))
-        }
+        addInteraction(UIPointerInteraction(delegate: self))
 
         // Setup edit menu interaction for copy/paste
         let interaction = UIEditMenuInteraction(delegate: self)
@@ -1676,7 +1666,6 @@ extension GhosttyTerminalView: UIGestureRecognizerDelegate {
     }
 }
 
-@available(iOS 13.4, *)
 extension GhosttyTerminalView: UIPointerInteractionDelegate {
     func pointerInteraction(
         _ interaction: UIPointerInteraction,
