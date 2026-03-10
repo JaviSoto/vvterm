@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Repro loop for iOS hardware-key handling using AXe on Simulator.
+# Repro loop for iOS keyboard handling using AXe on Simulator.
 # Runs VVTerm input harness against a real zellij session and flags leaked pane input.
 
 SIM_NAME="${SIM_NAME:-iPhone 17 Pro Max}"
@@ -11,10 +11,14 @@ ZELLIJ_BIN="${ZELLIJ_BIN:-/opt/homebrew/bin/zellij}"
 ZELLIJ_PROXY_SCRIPT="${ZELLIJ_PROXY_SCRIPT:-$PWD/scripts/zellij_harness_proxy.py}"
 KEY_SEQUENCE_REPETITIONS="${KEY_SEQUENCE_REPETITIONS:-1}"
 CTRL_SEQUENCE_METHOD="${CTRL_SEQUENCE_METHOD:-hardware}"
+PRIMARY_TEXT="${PRIMARY_TEXT:-t}"
+PRIMARY_KEYCODE="${PRIMARY_KEYCODE:-23}"
 FOLLOWUP_INPUT_METHOD="${FOLLOWUP_INPUT_METHOD:-key}"
 FOLLOWUP_TEXT="${FOLLOWUP_TEXT:-n}"
+HARNESS_PROFILE="${HARNESS_PROFILE:-tab-new-tab}"
 CTRL_T_TO_FOLLOWUP_DELAY="${CTRL_T_TO_FOLLOWUP_DELAY:-0.2}"
 VERIFY_NEW_TAB="${VERIFY_NEW_TAB:-1}"
+EXPECTED_TAB_NAME="${EXPECTED_TAB_NAME:-Tab #2}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_DIR="${LOG_DIR:-$PWD/build/input-trace-$STAMP}"
 
@@ -47,6 +51,7 @@ python3 "$ZELLIJ_PROXY_SCRIPT" \
   --port-file "$PORT_FILE" \
   --summary-file "$SUMMARY_FILE" \
   --zellij-bin "$ZELLIJ_BIN" \
+  --profile "$HARNESS_PROFILE" \
   >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
 
@@ -129,6 +134,13 @@ export SIMCTL_CHILD_VVTERM_INPUT_HARNESS=1
 export SIMCTL_CHILD_VVTERM_INPUT_TRACE=1
 export SIMCTL_CHILD_VVTERM_INPUT_HARNESS_TCP_HOST=127.0.0.1
 export SIMCTL_CHILD_VVTERM_INPUT_HARNESS_TCP_PORT="$HARNESS_PORT"
+if [[ "$CTRL_SEQUENCE_METHOD" == "toolbar_inserttext_auto" ]]; then
+  export SIMCTL_CHILD_VVTERM_INPUT_HARNESS_SOFTWARE_CTRL_PRIMARY="$PRIMARY_TEXT"
+  export SIMCTL_CHILD_VVTERM_INPUT_HARNESS_SOFTWARE_CTRL_FOLLOWUP="$FOLLOWUP_TEXT"
+else
+  unset SIMCTL_CHILD_VVTERM_INPUT_HARNESS_SOFTWARE_CTRL_PRIMARY
+  unset SIMCTL_CHILD_VVTERM_INPUT_HARNESS_SOFTWARE_CTRL_FOLLOWUP
+fi
 xcrun simctl launch \
   --terminate-running-process \
   --stdout="$APP_STDOUT" \
@@ -147,41 +159,52 @@ xcrun simctl io "$UDID" screenshot "$LOG_DIR/pre-keys.png" >/dev/null 2>&1 || tr
 axe tap -x 200 -y 450 --udid "$UDID" || true
 sleep 0.4
 for _ in $(seq 1 "$KEY_SEQUENCE_REPETITIONS"); do
+  auto_insert_sequence=0
   case "$CTRL_SEQUENCE_METHOD" in
     hardware)
-      axe key-combo --modifiers 224 --key 23 --udid "$UDID"  # Ctrl+T
+      axe key-combo --modifiers 224 --key "$PRIMARY_KEYCODE" --udid "$UDID"
       ;;
     softkey)
       axe tap --label "Ctrl" --udid "$UDID"
       sleep 0.1
-      axe tap --label "t" --udid "$UDID"
+      axe tap --label "$PRIMARY_TEXT" --udid "$UDID"
       ;;
     softkey_type)
       axe tap --label "Ctrl" --udid "$UDID"
       sleep 0.1
-      axe type "t" --udid "$UDID"
+      axe type "$PRIMARY_TEXT" --udid "$UDID"
+      ;;
+    toolbar_inserttext_auto)
+      auto_insert_sequence=1
       ;;
     *)
-      echo "Unsupported CTRL_SEQUENCE_METHOD='$CTRL_SEQUENCE_METHOD' (expected 'hardware', 'softkey', or 'softkey_type')" >&2
+      echo "Unsupported CTRL_SEQUENCE_METHOD='$CTRL_SEQUENCE_METHOD' (expected 'hardware', 'softkey', 'softkey_type', or 'toolbar_inserttext_auto')" >&2
       exit 1
       ;;
   esac
   sleep "$CTRL_T_TO_FOLLOWUP_DELAY"
-  case "$FOLLOWUP_INPUT_METHOD" in
-    key)
-      axe key 17 --udid "$UDID"                           # N
-      ;;
-    type)
-      axe type "$FOLLOWUP_TEXT" --udid "$UDID"
-      ;;
-    tap)
-      axe tap --label "$FOLLOWUP_TEXT" --udid "$UDID"
-      ;;
-    *)
-      echo "Unsupported FOLLOWUP_INPUT_METHOD='$FOLLOWUP_INPUT_METHOD' (expected 'key', 'type', or 'tap')" >&2
-      exit 1
-      ;;
-  esac
+  if [[ "$auto_insert_sequence" == "0" ]]; then
+    case "$FOLLOWUP_INPUT_METHOD" in
+      key)
+        axe key 17 --udid "$UDID"                           # N
+        ;;
+      type)
+        axe type "$FOLLOWUP_TEXT" --udid "$UDID"
+        ;;
+      tap)
+        axe tap --label "$FOLLOWUP_TEXT" --udid "$UDID"
+        ;;
+      symbol_tap)
+        axe tap --label "#+=" --udid "$UDID"
+        sleep 0.1
+        axe tap --label "$FOLLOWUP_TEXT" --udid "$UDID"
+        ;;
+      *)
+        echo "Unsupported FOLLOWUP_INPUT_METHOD='$FOLLOWUP_INPUT_METHOD' (expected 'key', 'type', 'tap', or 'symbol_tap')" >&2
+        exit 1
+        ;;
+    esac
+  fi
   sleep 0.3
 done
 sleep 0.8
@@ -259,23 +282,32 @@ cat "$TAB_NAMES_FILE"
 PANE_INPUT_FILE="$LOG_DIR/pane-input.bin"
 if [[ -s "$PANE_INPUT_FILE" ]]; then
   echo
-  echo "FAIL: detected leaked pane input bytes from Ctrl+T then N sequence."
+  echo "FAIL: detected leaked pane input bytes from Ctrl+$PRIMARY_TEXT then $FOLLOWUP_TEXT sequence."
   echo "Hex dump of leaked bytes:"
   xxd -g 1 "$PANE_INPUT_FILE" | head -n 40
   exit 2
 fi
 
 if [[ "$VERIFY_NEW_TAB" == "1" ]]; then
-  if ! grep -q "Tab #2" "$TAB_NAMES_FILE"; then
+  if ! grep -q "$EXPECTED_TAB_NAME" "$TAB_NAMES_FILE"; then
     echo
-    echo "FAIL: Ctrl+T then N did not create a new zellij tab."
+    echo "FAIL: Ctrl+$PRIMARY_TEXT then $FOLLOWUP_TEXT did not trigger the expected zellij action."
     exit 6
   fi
 fi
 
 echo
-echo "PASS: Ctrl+T then N created a new zellij tab with no pane-input leak."
+echo "PASS: Ctrl+$PRIMARY_TEXT then $FOLLOWUP_TEXT triggered the expected zellij action with no pane-input leak."
 
 echo
 echo "Artifacts:"
 echo "  $LOG_DIR"
+if [[ ${#PRIMARY_TEXT} -ne 1 ]]; then
+  echo "PRIMARY_TEXT must be a single character" >&2
+  exit 1
+fi
+
+if [[ ${#FOLLOWUP_TEXT} -ne 1 ]]; then
+  echo "FOLLOWUP_TEXT must be a single character" >&2
+  exit 1
+fi

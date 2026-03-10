@@ -36,7 +36,40 @@ def parse_args() -> argparse.Namespace:
         default=f"vvterm-harness-{int(time.time())}",
         help="Unique zellij session name.",
     )
+    parser.add_argument(
+        "--profile",
+        choices=("tab-new-tab", "resize-plus-new-tab"),
+        default="tab-new-tab",
+        help="Harness keybinding profile to load.",
+    )
     return parser.parse_args()
+
+
+def zellij_config_for_profile(profile: str) -> str:
+    if profile == "tab-new-tab":
+        return """keybinds clear-defaults=true {
+    normal {
+        bind "Ctrl t" { SwitchToMode "tab"; }
+    }
+    tab {
+        bind "Ctrl t" { SwitchToMode "normal"; }
+        bind "n" { NewTab; SwitchToMode "normal"; }
+    }
+}
+"""
+
+    if profile == "resize-plus-new-tab":
+        return """keybinds clear-defaults=true {
+    normal {
+        bind "Ctrl n" { SwitchToMode "resize"; }
+    }
+    resize {
+        bind "=" "+" { NewTab; SwitchToMode "normal"; }
+    }
+}
+"""
+
+    raise ValueError(f"Unsupported zellij harness profile: {profile}")
 
 
 def write_text(path: Path, contents: str) -> None:
@@ -100,18 +133,7 @@ cat >> {shlex.quote(str(pane_input_path))}
     write_text(sink_script_path, sink_script)
     sink_script_path.chmod(0o755)
 
-    # Keep keybinds minimal while matching real zellij tab-mode behavior:
-    # Ctrl+T enters tab mode, then n opens a new tab.
-    zellij_config = """keybinds clear-defaults=true {
-    normal {
-        bind "Ctrl t" { SwitchToMode "tab"; }
-    }
-    tab {
-        bind "Ctrl t" { SwitchToMode "normal"; }
-        bind "n" { NewTab; SwitchToMode "normal"; }
-    }
-}
-"""
+    zellij_config = zellij_config_for_profile(args.profile)
     write_text(zellij_config_path, zellij_config)
 
     master_fd, slave_fd = pty.openpty()

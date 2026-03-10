@@ -1387,7 +1387,13 @@ class GhosttyTerminalView: UIView {
         requestRender()
     }
 
-    private func sendModifiedKey(_ key: Ghostty.Input.Key, mods: Ghostty.Input.Mods, text: String? = nil, unshiftedCodepoint: UInt32 = 0) {
+    private func sendModifiedKey(
+        _ key: Ghostty.Input.Key,
+        mods: Ghostty.Input.Mods,
+        consumedMods: Ghostty.Input.Mods = [],
+        text: String? = nil,
+        unshiftedCodepoint: UInt32 = 0
+    ) {
         guard let surface = surface else { return }
         let press = Ghostty.Input.KeyEvent(
             key: key,
@@ -1395,7 +1401,7 @@ class GhosttyTerminalView: UIView {
             text: text,
             composing: false,
             mods: mods,
-            consumedMods: [],
+            consumedMods: consumedMods,
             unshiftedCodepoint: unshiftedCodepoint
         )
         surface.sendKeyEvent(press)
@@ -1405,7 +1411,7 @@ class GhosttyTerminalView: UIView {
             text: nil,
             composing: false,
             mods: mods,
-            consumedMods: [],
+            consumedMods: consumedMods,
             unshiftedCodepoint: unshiftedCodepoint
         )
         surface.sendKeyEvent(release)
@@ -2716,14 +2722,15 @@ extension GhosttyTerminalView: UIKeyInput, UITextInputTraits {
             return
         }
 
-        if text.count == 1,
-           let scalar = text.unicodeScalars.first {
-            let lower = String(Character(scalar)).lowercased()
-            if let key = Ghostty.Input.Key(rawValue: lower) {
-                let unshiftedCodepoint = lower.unicodeScalars.first?.value ?? scalar.value
-                sendModifiedKey(key, mods: [], text: lower, unshiftedCodepoint: unshiftedCodepoint)
-                return
-            }
+        if let mappedCharacter = TerminalSoftwareCharacterMapper.mapSingleCharacter(text) {
+            sendModifiedKey(
+                mappedCharacter.key,
+                mods: mappedCharacter.mods,
+                consumedMods: mappedCharacter.consumedMods,
+                text: mappedCharacter.text,
+                unshiftedCodepoint: mappedCharacter.unshiftedCodepoint
+            )
+            return
         }
 
         sendText(text)

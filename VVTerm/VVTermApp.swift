@@ -532,6 +532,9 @@ private struct InputHarnessTerminalHost: UIViewRepresentable {
         private var relayConnection: NWConnection?
         private var relayHost = "127.0.0.1"
         private var relayPort: UInt16?
+        private var softwareCtrlPrimary: String?
+        private var softwareCtrlFollowup: String?
+        private var didScheduleSoftwareCtrlInjection = false
 
         init(onWriteSummary: @escaping (String) -> Void) {
             self.onWriteSummary = onWriteSummary
@@ -552,6 +555,18 @@ private struct InputHarnessTerminalHost: UIViewRepresentable {
                let port = UInt16(envPort),
                port > 0 {
                 relayPort = port
+            }
+            if let primary = Self.value(after: "--vvterm-input-harness-software-ctrl-primary", in: args), primary.count == 1 {
+                softwareCtrlPrimary = primary
+            }
+            if let followup = Self.value(after: "--vvterm-input-harness-software-ctrl-followup", in: args), followup.count == 1 {
+                softwareCtrlFollowup = followup
+            }
+            if let envPrimary = env["VVTERM_INPUT_HARNESS_SOFTWARE_CTRL_PRIMARY"], envPrimary.count == 1 {
+                softwareCtrlPrimary = envPrimary
+            }
+            if let envFollowup = env["VVTERM_INPUT_HARNESS_SOFTWARE_CTRL_FOLLOWUP"], envFollowup.count == 1 {
+                softwareCtrlFollowup = envFollowup
             }
             Self.logLine("HarnessRelay init host=\(relayHost) port=\(relayPort.map(String.init) ?? "none")")
         }
@@ -602,6 +617,7 @@ private struct InputHarnessTerminalHost: UIViewRepresentable {
                 terminalView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
             attach(to: terminalView)
+            scheduleSoftwareCtrlInjectionIfNeeded()
         }
 
         private func handleTerminalWrite(_ data: Data) {
@@ -676,6 +692,16 @@ private struct InputHarnessTerminalHost: UIViewRepresentable {
                     return
                 }
                 self.receiveLoop()
+            }
+        }
+
+        private func scheduleSoftwareCtrlInjectionIfNeeded() {
+            guard !didScheduleSoftwareCtrlInjection else { return }
+            guard let primary = softwareCtrlPrimary, let followup = softwareCtrlFollowup else { return }
+            didScheduleSoftwareCtrlInjection = true
+            publish("HarnessRelay injecting software ctrl sequence primary='\(primary)' followup='\(followup)'")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.terminalView?.harnessInjectSoftwareCtrlSequence(primary: primary, followup: followup)
             }
         }
 
