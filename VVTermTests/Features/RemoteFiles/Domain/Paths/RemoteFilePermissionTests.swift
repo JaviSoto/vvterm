@@ -7,7 +7,7 @@ struct RemoteFilePermissionTests {
     func draftUpdatesBitsAndSummaries() {
         var draft = RemoteFilePermissionDraft(accessBits: 0o640)
         draft.set(true, capability: .execute, for: .owner)
-        draft.set(false, capability: .read, for: .group)
+        draft.set(false, capability: .write, for: .group)
 
         #expect(draft.accessBits == 0o740)
         #expect(draft.octalSummary == "740")

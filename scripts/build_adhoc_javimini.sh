@@ -6,8 +6,9 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEAM_ID="${TEAM_ID:-6V6XY979JQ}"
-APP_PROFILE="${APP_PROFILE:-VVTerm Codex AdHoc 20260222-215936}"
-EXT_PROFILE="${EXT_PROFILE:-VVTerm LiveActivity AdHoc 20260222-215936}"
+APP_PROFILE="${APP_PROFILE:-VVTerm Codex AdHoc 20260620-174531}"
+EXT_PROFILE="${EXT_PROFILE:-VVTerm LiveActivity AdHoc 20260620-174532}"
+SIGNING_CERTIFICATE="${SIGNING_CERTIFICATE:-4F5890E9E95A22EB4341488E18BC37B8883227CD}"
 FORCE_PRO_TESTING="${FORCE_PRO_TESTING:-1}"
 KEYCHAIN_PATH="${KEYCHAIN_PATH:-$HOME/Library/Keychains/codex-signing.keychain-db}"
 KEYCHAIN_PASSWORD_FILE="${KEYCHAIN_PASSWORD_FILE:-$HOME/.codex/secrets/javimini-keychain-password}"
@@ -23,13 +24,40 @@ OUT_DIR="$PROJECT_ROOT/build/adhoc-manual-$TS"
 ARCHIVE_PATH="$OUT_DIR/VVTerm.xcarchive"
 EXPORT_PATH="$OUT_DIR/export"
 EXPORT_OPTIONS="$OUT_DIR/ExportOptions.plist"
+ORIGINAL_KEYCHAINS="$OUT_DIR/original-keychains.txt"
+ORIGINAL_DEFAULT_KEYCHAIN="$OUT_DIR/original-default-keychain.txt"
 
 mkdir -p "$OUT_DIR"
 
+security list-keychains -d user >"$ORIGINAL_KEYCHAINS"
+security default-keychain -d user >"$ORIGINAL_DEFAULT_KEYCHAIN"
+
+restore_keychain_settings() {
+  local default_keychain
+  local -a keychains
+  local keychain
+
+  default_keychain="$(sed 's/^ *"//; s/"$//' "$ORIGINAL_DEFAULT_KEYCHAIN")"
+  keychains=()
+  while IFS= read -r keychain; do
+    keychain="$(printf '%s' "$keychain" | sed 's/^ *"//; s/"$//')"
+    [[ -n "$keychain" ]] && keychains+=("$keychain")
+  done <"$ORIGINAL_KEYCHAINS"
+
+  if [[ ${#keychains[@]} -gt 0 ]]; then
+    CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security list-keychains -d user -s "${keychains[@]}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$default_keychain" ]]; then
+    CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security default-keychain -d user -s "$default_keychain" >/dev/null 2>&1 || true
+  fi
+}
+
+trap restore_keychain_settings EXIT
+
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-security list-keychains -s "$KEYCHAIN_PATH"
-security default-keychain -s "$KEYCHAIN_PATH"
+CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security list-keychains -d user -s "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db"
+CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security default-keychain -d user -s "$KEYCHAIN_PATH"
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
 
 XCODE_EXTRA_ARGS=()
@@ -38,7 +66,7 @@ if [[ "$FORCE_PRO_TESTING" == "1" ]]; then
   XCODE_EXTRA_ARGS+=("SWIFT_ACTIVE_COMPILATION_CONDITIONS=\$(inherited) VVTERM_FORCE_PRO_FOR_TESTING")
 fi
 
-xcodebuild \
+/usr/bin/xcodebuild \
   -project "$PROJECT_ROOT/VVTerm.xcodeproj" \
   -scheme VVTerm \
   -configuration Release \
@@ -58,7 +86,7 @@ cat >"$EXPORT_OPTIONS" <<PLIST
   <key>signingStyle</key>
   <string>manual</string>
   <key>signingCertificate</key>
-  <string>iPhone Distribution</string>
+  <string>$SIGNING_CERTIFICATE</string>
   <key>teamID</key>
   <string>$TEAM_ID</string>
   <key>provisioningProfiles</key>
@@ -76,7 +104,7 @@ cat >"$EXPORT_OPTIONS" <<PLIST
 </plist>
 PLIST
 
-xcodebuild \
+/usr/bin/xcodebuild \
   -exportArchive \
   -archivePath "$ARCHIVE_PATH" \
   -exportPath "$EXPORT_PATH" \

@@ -586,10 +586,6 @@ nonisolated extension TerminalAccessoryProfile {
             normalizedItems = Array(normalizedItems.prefix(Self.maxActiveItems))
         }
 
-        if normalizedItems.count < Self.minActiveItems {
-            normalizedItems = Self.defaultActiveItems
-        }
-
         return TerminalAccessoryProfile(
             schemaVersion: max(Self.schemaVersion, schemaVersion),
             layout: TerminalAccessoryLayout(
