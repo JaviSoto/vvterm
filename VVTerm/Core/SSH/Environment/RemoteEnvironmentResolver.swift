@@ -34,11 +34,7 @@ nonisolated struct RemoteShellProfile: Hashable, Sendable {
         switch family {
         case .posix:
             guard !trimmed.isEmpty else {
-                let script = RemoteTerminalBootstrap.prefixedPOSIXScript(
-                    for: RemoteTerminalBootstrap.defaultLoginShellCommand(),
-                    bundle: bundle
-                )
-                return .exec(RemoteTerminalBootstrap.wrapPOSIXShellCommand(script))
+                return .shell
             }
             let script = RemoteTerminalBootstrap.prefixedPOSIXScript(for: trimmed, bundle: bundle)
             return .exec(RemoteTerminalBootstrap.wrapPOSIXShellCommand(script))

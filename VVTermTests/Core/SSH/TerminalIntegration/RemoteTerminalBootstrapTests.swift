@@ -32,16 +32,14 @@ struct RemoteTerminalBootstrapTests {
     )
 
     @Test
-    func launchPlanWithoutStartupCommandUsesPOSIXLoginShellBootstrap() {
+    func launchPlanWithoutStartupCommandRequestsRemoteInteractiveShellForPOSIX() {
         let plan = RemoteTerminalBootstrap.launchPlan(startupCommand: nil, environment: posixEnvironment)
 
         switch plan {
         case .shell:
-            Issue.record("Expected POSIX login shell bootstrap when no startup command is provided")
+            break
         case .exec(let command):
-            #expect(command.hasPrefix("/bin/sh -lc \""))
-            #expect(command.contains("exec \\\"\\$SHELL\\\" -l"))
-            #expect(command.contains("TERM_PROGRAM"))
+            Issue.record("Expected plain SSH shell launch, got exec command: \(command)")
         }
     }
 
