@@ -100,8 +100,8 @@ final class TerminalTabManager {
                 workingDirectory: { [weak sessionState] paneId in
                     sessionState?.paneState(for: paneId)?.workingDirectory
                 },
-                shouldApplyWorkingDirectory: { [weak tmuxCoordinator] paneId in
-                    tmuxCoordinator?.shouldApplyWorkingDirectory(for: paneId) == true
+                shouldApplyPlainShellSetup: { [weak tmuxCoordinator] paneId in
+                    tmuxCoordinator?.shouldApplyPlainShellSetup(for: paneId) == true
                 },
                 send: { event in
                     runtimeEvents.send(event)

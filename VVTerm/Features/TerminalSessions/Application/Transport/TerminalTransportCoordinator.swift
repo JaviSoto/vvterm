@@ -14,7 +14,7 @@ struct TerminalTransportSessionAccess {
     let tabs: (UUID) -> [TerminalTab]
     let containsPane: (UUID) -> Bool
     let workingDirectory: (UUID) -> String?
-    let shouldApplyWorkingDirectory: (UUID) -> Bool
+    let shouldApplyPlainShellSetup: (UUID) -> Bool
     let send: (TerminalTransportSessionEvent) -> Void
 }
 
@@ -934,10 +934,10 @@ final class TerminalTransportCoordinator {
                 sessionAccess.send(.connectionState(paneId, .failed(failure)))
             },
             shouldApplyPlainShellSetup: {
-                ownsConnection() && sessionAccess.shouldApplyWorkingDirectory(paneId)
+                ownsConnection() && sessionAccess.shouldApplyPlainShellSetup(paneId)
             },
             workingDirectory: {
-                guard ownsConnection(), sessionAccess.shouldApplyWorkingDirectory(paneId) else {
+                guard ownsConnection(), sessionAccess.shouldApplyPlainShellSetup(paneId) else {
                     return nil
                 }
                 return sessionAccess.workingDirectory(paneId)

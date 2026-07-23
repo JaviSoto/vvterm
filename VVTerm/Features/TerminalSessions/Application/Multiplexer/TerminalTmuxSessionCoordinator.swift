@@ -220,7 +220,8 @@ final class TerminalTmuxSessionCoordinator: ObservableObject {
         )
     }
 
-    func shouldApplyWorkingDirectory(for paneId: UUID) -> Bool {
+    /// Whether post-connect setup may write into this pane's plain interactive shell.
+    func shouldApplyPlainShellSetup(for paneId: UUID) -> Bool {
         guard let status = status(for: paneId) else { return false }
         return status == .off || status == .missing
     }

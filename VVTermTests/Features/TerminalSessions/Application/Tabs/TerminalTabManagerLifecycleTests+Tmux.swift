@@ -8,6 +8,24 @@ extension TerminalTabManagerLifecycleTests {
     @MainActor
     struct Tmux: TerminalTabManagerTestSupport {
         @Test
+        func plainShellSetupOnlyAppliesWhenTmuxIsInactive() async {
+            await withCleanManager { manager in
+                let tab = TerminalTab(serverId: UUID(), title: "Plain shell setup")
+                installTab(tab, in: manager, connectionState: .connected)
+
+                for status in [TmuxStatus.off, .missing] {
+                    manager.tmuxCoordinator.updateStatus(status, for: tab.rootPaneId)
+                    #expect(manager.tmuxCoordinator.shouldApplyPlainShellSetup(for: tab.rootPaneId))
+                }
+
+                for status in [TmuxStatus.foreground, .background, .installing, .unknown] {
+                    manager.tmuxCoordinator.updateStatus(status, for: tab.rootPaneId)
+                    #expect(!manager.tmuxCoordinator.shouldApplyPlainShellSetup(for: tab.rootPaneId))
+                }
+            }
+        }
+
+        @Test
         func managedTmuxEndClosesItsLastPaneAndTab() async {
             await withCleanManager { manager in
                 let tab = TerminalTab(serverId: UUID(), title: "Managed tmux")

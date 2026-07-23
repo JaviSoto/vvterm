@@ -147,8 +147,6 @@ final class TerminalPaneSSHCoordinator {
                             logger: logger
                         )
                     }
-                }
-                if shell.origin == .fresh {
                     await applyStartupCommand(
                         server.startupCommand,
                         shellId: shell.id,
