@@ -32,6 +32,27 @@ struct TerminalAccessoryModelsTests {
     }
 
     @Test
+    func normalizationPreservesAUserLayoutWithFewerThanFourItems() {
+        let activeItems: [TerminalAccessoryItemRef] = [
+            .system(.escape),
+            .system(.tab)
+        ]
+        let profile = TerminalAccessoryProfile(
+            schemaVersion: TerminalAccessoryProfile.schemaVersion,
+            layout: TerminalAccessoryLayout(
+                version: 1,
+                activeItems: activeItems,
+                updatedAt: Date(timeIntervalSince1970: 1)
+            ),
+            customActions: [],
+            updatedAt: Date(timeIntervalSince1970: 1),
+            lastWriterDeviceId: "test-device"
+        )
+
+        #expect(profile.normalized().layout.activeItems == activeItems)
+    }
+
+    @Test
     func normalizedDeletedSnippetClearsPayload() {
         let deletedAt = Date(timeIntervalSince1970: 1000)
         let profile = TerminalAccessoryProfile(
