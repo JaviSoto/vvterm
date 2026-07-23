@@ -16,7 +16,10 @@ extension CloudKitManager {
             return
         }
         guard isCurrentGeneration(generation), isAvailable else { return }
-        guard let database = try? requireDatabase() else { return }
+        guard let database else {
+            logger.debug("CloudKit database is unavailable; skipping change subscription")
+            return
+        }
 
         let subscriptionID = CloudKitSyncConstants.databaseSubscriptionID
 
@@ -27,11 +30,15 @@ extension CloudKitManager {
         subscription.notificationInfo = notification
 
         do {
-            if let existing = try? await database.subscription(for: subscriptionID) as? CKDatabaseSubscription,
-               existing.notificationInfo?.shouldSendContentAvailable == true {
-                guard isCurrentGeneration(generation) else { return }
-                logger.debug("CloudKit database subscription already configured")
-                return
+            do {
+                if let existing = try await database.subscription(for: subscriptionID) as? CKDatabaseSubscription,
+                   existing.notificationInfo?.shouldSendContentAvailable == true {
+                    guard isCurrentGeneration(generation) else { return }
+                    logger.debug("CloudKit database subscription already configured")
+                    return
+                }
+            } catch {
+                logger.debug("Could not reuse CloudKit database subscription: \(error.localizedDescription)")
             }
 
             guard isCurrentGeneration(generation) else { return }
