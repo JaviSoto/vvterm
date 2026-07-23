@@ -35,6 +35,9 @@ struct TerminalThemePickerScreen: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 TerminalThemePickerPreview(themeName: selectedTheme)
+                Text("This sample uses each theme's background, text, cursor, selection, and ANSI palette colors.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -90,38 +93,81 @@ struct TerminalThemePickerScreen: View {
 private struct TerminalThemePickerPreview: View {
     let themeName: String
 
-    private var palette: TerminalThemePreviewPalette {
-        ThemeColorParser.previewPalette(for: themeName)
+    private var preview: ThemeColorParser.ThemePreviewValues {
+        ThemeColorParser.previewValues(for: themeName)
+    }
+
+    private func paletteColor(_ index: Int) -> Color {
+        preview.paletteColor(at: index)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(themeName)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(palette.foreground.opacity(0.82))
+                .foregroundStyle(preview.foregroundColor.opacity(0.88))
 
             Text("vvterm@prod-web-01:~$ ./deploy --env prod")
 
+            HStack(spacing: 8) {
+                Text("INFO")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(paletteColor(6))
+                Text("ok")
+                    .foregroundStyle(paletteColor(2))
+                Text("warn")
+                    .italic()
+                    .foregroundStyle(paletteColor(3))
+                Text("err")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(paletteColor(1))
+            }
+
             HStack(spacing: 6) {
-                Text("connected")
-                    .foregroundStyle(palette.foreground.opacity(0.72))
+                Text("cursor>")
+                    .foregroundStyle(preview.foregroundColor.opacity(0.8))
                 Text("A")
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(palette.cursor)
-                    .foregroundStyle(palette.cursorText)
+                    .background(preview.cursorColor)
+                    .foregroundStyle(preview.cursorTextColor)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                Text("selection")
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(preview.selectionBackgroundColor)
+                    .foregroundStyle(preview.selectionForegroundColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            Rectangle()
+                .fill(preview.foregroundColor.opacity(0.16))
+                .frame(height: 1)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(minimum: 20), spacing: 5), count: 8),
+                spacing: 5
+            ) {
+                ForEach(0..<16, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(paletteColor(index))
+                        .frame(height: 14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .stroke(preview.foregroundColor.opacity(0.2), lineWidth: 1)
+                        )
+                }
             }
         }
         .font(.system(size: 12, weight: .regular, design: .monospaced))
-        .foregroundStyle(palette.foreground)
+        .foregroundStyle(preview.foregroundColor)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.background)
+        .background(preview.backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(palette.foreground.opacity(0.15), lineWidth: 1)
+                .stroke(preview.foregroundColor.opacity(0.15), lineWidth: 1)
         )
     }
 }
