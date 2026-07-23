@@ -323,13 +323,12 @@ extension GhosttyTerminalView {
         case GHOSTTY_ACTION_REPEAT: .repeat
         default: .press
         }
-        guard let event = Ghostty.Input.KeyEvent(uiKey: key, action: ghosttyAction) else {
-            return nil
-        }
-        guard event.withCValue(execute: { cEvent in
+        return Ghostty.Input.KeyEvent.dispatchHardwareKey(
+            .init(uiKey: key),
+            action: ghosttyAction
+        ) { cEvent in
             ghostty_surface_key(cSurface, cEvent)
-        }) else { return nil }
-        return event
+        }
     }
 
     private func isTextInputModifierOnlyKey(_ key: UIKey) -> Bool {

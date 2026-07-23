@@ -484,6 +484,16 @@ struct TerminalKeyboardUITestHarness: View {
                     }
                 }
 
+                Button("Ctrl-T n") {
+                    receivedInput.removeAll()
+                    receivedInputHex = "none"
+                    terminalView?.keyboardUITestInjectSoftwareControlSequence(
+                        primary: "t",
+                        followup: "n"
+                    )
+                }
+                .accessibilityIdentifier("vvterm.keyboardTest.software.ctrlTThenN")
+
                 Button("Cursor Bottom") {
                     terminalView?.keyboardUITestMoveCursorToBottom()
                 }
@@ -739,6 +749,9 @@ struct TerminalKeyboardUITestHarness: View {
         let mouseScrollReports = mouseReportCount(buttonPattern: "6[45]", terminator: "M")
         let lowercaseHInputs = inputByteCount(0x68)
         let uppercaseHInputs = inputByteCount(0x48)
+        let allInputHex = receivedInput.isEmpty
+            ? "none"
+            : receivedInput.map { String(format: "%02x", $0) }.joined()
         diagnostics = terminalDiagnostics + " " + keyboardAvoidanceDiagnostics(for: terminalView)
             + " keyboardPresentation=\(keyboardPresentationDescription)"
             + " cachedTerminalBackground=\(UserDefaults.standard.string(forKey: "terminalBackgroundColor") ?? "none")"
@@ -748,6 +761,7 @@ struct TerminalKeyboardUITestHarness: View {
             + " accessoryPairingObservation=\(keyboardAccessoryPairingObservation.status)"
             + " orphanAccessoryObserved=\(keyboardAccessoryPairingObservation.observedAccessoryOnly)"
             + " reconnect=\(lifecycleStatus.rawValue) inputHex=\(receivedInputHex)"
+            + " inputBytesHex=\(allInputHex)"
             + " returnInputs=\(returnInputCount) codexResponses=\(codexResponseCount)"
             + " findPresented=\(terminalView.isFindNavigatorVisible)"
             + " mouseCaptured=\(terminalView.surface?.mouseCaptured == true)"

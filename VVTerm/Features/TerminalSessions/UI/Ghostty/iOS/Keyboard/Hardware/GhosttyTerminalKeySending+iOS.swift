@@ -18,15 +18,22 @@ extension GhosttyTerminalView {
     }
 
     private func sendControlByte(_ value: UInt8) {
-        guard canRouteTerminalInput else { return }
-        invalidateLocalTextInputSession()
-        let scalar = UnicodeScalar(value)
-        sendText(String(Character(scalar)))
+        sendRawInputData(Data([value]))
     }
 
     func sendAnsiSequence(_ data: Data) {
+        sendRawInputData(data)
+    }
+
+    private func sendRawInputData(_ data: Data) {
         guard canRouteTerminalInput else { return }
+        guard !data.isEmpty else { return }
         invalidateLocalTextInputSession()
+        if let writeCallback {
+            writeCallback(data)
+            requestRender()
+            return
+        }
         let text = String(decoding: data, as: UTF8.self)
         sendText(text)
     }

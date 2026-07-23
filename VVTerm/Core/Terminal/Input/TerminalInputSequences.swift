@@ -61,12 +61,34 @@ enum TerminalSpecialKeySequence {
 /// Utility to compute the control character for a given letter (Ctrl+A = 0x01, Ctrl+Z = 0x1A)
 enum TerminalControlKey {
     /// Returns the control character for the given letter, or nil if not A-Z
-    static func controlCharacter(for char: Character) -> Character? {
+    nonisolated static func controlCharacter(for char: Character) -> Character? {
         let asciiValue = char.uppercased().first?.asciiValue ?? 0
         if asciiValue >= 65 && asciiValue <= 90 {
             return Character(UnicodeScalar(asciiValue - 64))
         }
         return nil
+    }
+}
+
+/// Encodes software-keyboard modifiers into the raw bytes expected by terminal programs.
+enum TerminalSoftwareModifierEncoder {
+    /// Encodes Ctrl/Alt plus a printable key when it has a canonical control byte.
+    nonisolated static func encodeControlSequence(
+        char: Character,
+        ctrl: Bool,
+        alt: Bool,
+        command: Bool,
+        shift: Bool
+    ) -> Data? {
+        guard ctrl, !command, !shift else { return nil }
+        guard let controlChar = TerminalControlKey.controlCharacter(for: char) else { return nil }
+
+        var data = Data()
+        if alt {
+            data.append(0x1B)
+        }
+        data.append(contentsOf: String(controlChar).utf8)
+        return data
     }
 }
 

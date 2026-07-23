@@ -93,6 +93,16 @@ extension GhosttyTerminalView {
         feedData(Data(lines.utf8))
     }
 
+    func keyboardUITestInjectSoftwareControlSequence(primary: String, followup: String) {
+        guard primary.count == 1, followup.count == 1 else { return }
+        _ = resolvedInputAccessoryView()
+        keyboardToolbar?.keyboardUITestSetModifiers(.init(control: true))
+        _ = handleIMEProxyInsertText(primary)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            _ = self?.handleIMEProxyInsertText(followup)
+        }
+    }
+
     func keyboardUITestSetMarkedText(_ text: String) {
         guard !text.isEmpty else { return }
         if !imeProxyTextView.isFirstResponder {

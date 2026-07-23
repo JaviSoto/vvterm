@@ -133,6 +133,20 @@ extension GhosttyTerminalView {
         }
         guard let firstChar = normalized.first else { return true }
 
+        if let controlSequence = TerminalSoftwareModifierEncoder.encodeControlSequence(
+            char: firstChar,
+            ctrl: mods.ctrl,
+            alt: mods.alt,
+            command: mods.command,
+            shift: mods.shift
+        ) {
+            sendAnsiSequence(controlSequence)
+            if normalized.count > 1 {
+                sendText(String(normalized.dropFirst()))
+            }
+            return true
+        }
+
         if let mapping = ghosttyKeyMapping(for: firstChar) {
             var ghostMods: Ghostty.Input.Mods = []
             if mods.ctrl { ghostMods.insert(.ctrl) }

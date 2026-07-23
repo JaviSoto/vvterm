@@ -3,6 +3,23 @@ import XCTest
 
 final class TerminalKeyboardShortcutUITests: TerminalKeyboardUITestCase {
     @MainActor
+    func testSoftwareCtrlTThenNEmitsExactRawBytes() throws {
+        let app = launchKeyboardHarness()
+        _ = waitForTerminal(in: app)
+        let diagnostics = app.staticTexts["vvterm.keyboardTest.diagnostics"]
+        let injectSequence = app.buttons["vvterm.keyboardTest.software.ctrlTThenN"]
+
+        XCTAssertTrue(injectSequence.waitForExistence(timeout: 5), diagnosticsText(in: app))
+        injectSequence.tap()
+        wait(
+            for: diagnostics,
+            labelContaining: "inputBytesHex=146e",
+            timeout: 5,
+            diagnostics: diagnosticsText(in: app)
+        )
+    }
+
+    @MainActor
     func testIMEProxyMarkedTextDeleteAndCommitPath() throws {
         let app = launchKeyboardHarness()
         let terminal = waitForTerminal(in: app)
@@ -331,4 +348,3 @@ final class TerminalKeyboardShortcutUITests: TerminalKeyboardUITestCase {
 
 }
 #endif
-

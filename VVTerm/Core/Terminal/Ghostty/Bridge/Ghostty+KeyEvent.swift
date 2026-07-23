@@ -6,6 +6,7 @@ import UIKit
 
 extension Ghostty.Input {
     #if os(iOS)
+    /// Stable UIKit key data used to construct and unit-test Ghostty hardware events.
     struct HardwareKeyDescriptor {
         let keyCode: UIKeyboardHIDUsage
         let modifierFlags: UIKeyModifierFlags
@@ -160,6 +161,22 @@ extension Ghostty.Input {
         /// Create a KeyEvent from a UIKey (iOS hardware keyboard)
         init?(uiKey: UIKey, action: Action) {
             self.init(hardwareKey: .init(uiKey: uiKey), action: action)
+        }
+
+        /// Dispatches a representable hardware key and returns the event that was sent.
+        ///
+        /// Ghostty's boolean return reports whether a binding handled the key, not
+        /// whether the event reached Ghostty, so it must not be treated as transport failure.
+        static func dispatchHardwareKey(
+            _ hardwareKey: HardwareKeyDescriptor,
+            action: Action,
+            send: (ghostty_input_key_s) -> Bool
+        ) -> KeyEvent? {
+            guard let event = KeyEvent(hardwareKey: hardwareKey, action: action) else {
+                return nil
+            }
+            _ = event.withCValue(execute: send)
+            return event
         }
         #endif
 
