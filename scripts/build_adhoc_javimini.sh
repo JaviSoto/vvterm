@@ -24,41 +24,15 @@ OUT_DIR="$PROJECT_ROOT/build/adhoc-manual-$TS"
 ARCHIVE_PATH="$OUT_DIR/VVTerm.xcarchive"
 EXPORT_PATH="$OUT_DIR/export"
 EXPORT_OPTIONS="$OUT_DIR/ExportOptions.plist"
-ORIGINAL_KEYCHAINS="$OUT_DIR/original-keychains.txt"
-ORIGINAL_DEFAULT_KEYCHAIN="$OUT_DIR/original-default-keychain.txt"
 
 mkdir -p "$OUT_DIR"
 
-security list-keychains -d user >"$ORIGINAL_KEYCHAINS"
-security default-keychain -d user >"$ORIGINAL_DEFAULT_KEYCHAIN"
-
-restore_keychain_settings() {
-  local default_keychain
-  local -a keychains
-  local keychain
-
-  default_keychain="$(sed 's/^ *"//; s/"$//' "$ORIGINAL_DEFAULT_KEYCHAIN")"
-  keychains=()
-  while IFS= read -r keychain; do
-    keychain="$(printf '%s' "$keychain" | sed 's/^ *"//; s/"$//')"
-    [[ -n "$keychain" ]] && keychains+=("$keychain")
-  done <"$ORIGINAL_KEYCHAINS"
-
-  if [[ ${#keychains[@]} -gt 0 ]]; then
-    CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security list-keychains -d user -s "${keychains[@]}" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "$default_keychain" ]]; then
-    CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security default-keychain -d user -s "$default_keychain" >/dev/null 2>&1 || true
-  fi
-}
-
-trap restore_keychain_settings EXIT
-
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security list-keychains -d user -s "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db"
-CODEX_ALLOW_KEYCHAIN_GLOBAL_MUTATION=1 security default-keychain -d user -s "$KEYCHAIN_PATH"
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+if /usr/bin/xattr -p com.apple.quarantine "$KEYCHAIN_PATH" >/dev/null 2>&1; then
+  /usr/bin/xattr -d com.apple.quarantine "$KEYCHAIN_PATH"
+fi
 
 XCODE_EXTRA_ARGS=()
 if [[ "$FORCE_PRO_TESTING" == "1" ]]; then
