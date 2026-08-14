@@ -11,7 +11,13 @@ EXT_PROFILE="${EXT_PROFILE:-VVTerm LiveActivity AdHoc 20260620-174532}"
 SIGNING_CERTIFICATE="${SIGNING_CERTIFICATE:-4F5890E9E95A22EB4341488E18BC37B8883227CD}"
 FORCE_PRO_TESTING="${FORCE_PRO_TESTING:-1}"
 KEYCHAIN_PATH="${KEYCHAIN_PATH:-$HOME/Library/Keychains/login.keychain-db}"
-KEYCHAIN_PASSWORD_FILE="${KEYCHAIN_PASSWORD_FILE:-$HOME/.codex/secrets/javimini-keychain-password}"
+KEYCHAIN_HOST_ID="$(/usr/bin/tr -d '\n' < "$HOME/.codex/host-id")"
+KEYCHAIN_PASSWORD_FILE="${KEYCHAIN_PASSWORD_FILE:-$HOME/.codex/secrets/${KEYCHAIN_HOST_ID}-keychain-password}"
+
+if [[ "$KEYCHAIN_PATH" != "$HOME/Library/Keychains/login.keychain-db" ]]; then
+  echo "This local signing helper only uses the existing login keychain: $KEYCHAIN_PATH" >&2
+  exit 1
+fi
 
 if [[ ! -f "$KEYCHAIN_PASSWORD_FILE" ]]; then
   echo "missing keychain password file: $KEYCHAIN_PASSWORD_FILE" >&2
@@ -28,8 +34,7 @@ EXPORT_OPTIONS="$OUT_DIR/ExportOptions.plist"
 mkdir -p "$OUT_DIR"
 
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 if /usr/bin/xattr -p com.apple.quarantine "$KEYCHAIN_PATH" >/dev/null 2>&1; then
   /usr/bin/xattr -d com.apple.quarantine "$KEYCHAIN_PATH"
 fi
@@ -46,6 +51,8 @@ fi
   -configuration Release \
   -destination generic/platform=iOS \
   DEVELOPMENT_TEAM="$TEAM_ID" \
+  CODE_SIGN_KEYCHAIN="$KEYCHAIN_PATH" \
+  OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
   "${XCODE_EXTRA_ARGS[@]}" \
   -archivePath "$ARCHIVE_PATH" \
   clean archive | tee "$OUT_DIR/archive.log"
