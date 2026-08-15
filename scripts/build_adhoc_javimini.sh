@@ -11,20 +11,23 @@ EXT_PROFILE="${EXT_PROFILE:-VVTerm LiveActivity AdHoc 20260620-174532}"
 SIGNING_CERTIFICATE="${SIGNING_CERTIFICATE:-4F5890E9E95A22EB4341488E18BC37B8883227CD}"
 FORCE_PRO_TESTING="${FORCE_PRO_TESTING:-1}"
 KEYCHAIN_PATH="${KEYCHAIN_PATH:-$HOME/Library/Keychains/login.keychain-db}"
-KEYCHAIN_HOST_ID="$(/usr/bin/tr -d '\n' < "$HOME/.codex/host-id")"
-KEYCHAIN_PASSWORD_FILE="${KEYCHAIN_PASSWORD_FILE:-$HOME/.codex/secrets/${KEYCHAIN_HOST_ID}-keychain-password}"
 
 if [[ "$KEYCHAIN_PATH" != "$HOME/Library/Keychains/login.keychain-db" ]]; then
   echo "This local signing helper only uses the existing login keychain: $KEYCHAIN_PATH" >&2
   exit 1
 fi
 
-if [[ ! -f "$KEYCHAIN_PASSWORD_FILE" ]]; then
-  echo "missing keychain password file: $KEYCHAIN_PASSWORD_FILE" >&2
+if [[ ! -f "$KEYCHAIN_PATH" ]]; then
+  echo "Signing keychain not found: $KEYCHAIN_PATH" >&2
   exit 1
 fi
 
-KEYCHAIN_PASSWORD="$(<"$KEYCHAIN_PASSWORD_FILE")"
+IDENTITY_OUTPUT="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH")"
+if ! grep -Fq "$SIGNING_CERTIFICATE" <<<"$IDENTITY_OUTPUT"; then
+  echo "Signing identity $SIGNING_CERTIFICATE is not available in $KEYCHAIN_PATH" >&2
+  exit 1
+fi
+
 TS="$(date +%Y%m%d-%H%M%S)"
 OUT_DIR="$PROJECT_ROOT/build/adhoc-manual-$TS"
 ARCHIVE_PATH="$OUT_DIR/VVTerm.xcarchive"
@@ -32,12 +35,6 @@ EXPORT_PATH="$OUT_DIR/export"
 EXPORT_OPTIONS="$OUT_DIR/ExportOptions.plist"
 
 mkdir -p "$OUT_DIR"
-
-security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-if /usr/bin/xattr -p com.apple.quarantine "$KEYCHAIN_PATH" >/dev/null 2>&1; then
-  /usr/bin/xattr -d com.apple.quarantine "$KEYCHAIN_PATH"
-fi
 
 XCODE_EXTRA_ARGS=()
 if [[ "$FORCE_PRO_TESTING" == "1" ]]; then

@@ -173,7 +173,9 @@ Environment overrides:
 - `SIGNING_CERTIFICATE` (default `4F5890E9E95A22EB4341488E18BC37B8883227CD`)
 - `FORCE_PRO_TESTING` (default `1`; set to `0` to build without the testing-only Pro unlock)
 - `KEYCHAIN_PATH` (default `~/Library/Keychains/login.keychain-db`)
-- `KEYCHAIN_PASSWORD_FILE` (default `~/.codex/secrets/<host-id>-keychain-password`)
+
+The login keychain must already be unlocked and contain the signing identity.
+The build script does not handle its password or change keychain policy.
 
 ## Dependencies
 
