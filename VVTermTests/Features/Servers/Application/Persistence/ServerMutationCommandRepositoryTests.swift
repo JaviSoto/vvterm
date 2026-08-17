@@ -15,9 +15,9 @@ struct ServerMutationCommandRepositoryTests {
             name: "New",
             host: "new.example.test",
             username: "root",
-            startupCommand: "zellij attach",
             lastConnected: .distantPast,
             isFavorite: true,
+            startupCommand: "zellij attach",
             createdAt: .distantPast,
             updatedAt: .distantPast
         )
@@ -50,9 +50,9 @@ struct ServerMutationCommandRepositoryTests {
             name: "Edited",
             host: "edited.example.test",
             username: "root",
-            startupCommand: "zellij attach",
             lastConnected: lastConnected,
             isFavorite: true,
+            startupCommand: "zellij attach",
             createdAt: createdAt,
             updatedAt: .distantPast
         )

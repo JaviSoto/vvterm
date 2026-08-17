@@ -58,6 +58,7 @@ struct TerminalThemePickerScreen: View {
             }
             .listStyle(.insetGrouped)
         }
+        .accessibilityIdentifier("vvterm.settings.themePicker.page")
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -169,6 +170,8 @@ private struct TerminalThemePickerPreview: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(preview.foregroundColor.opacity(0.15), lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("vvterm.settings.themePicker.preview")
     }
 }
 #endif

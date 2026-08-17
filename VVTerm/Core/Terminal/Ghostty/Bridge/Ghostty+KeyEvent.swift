@@ -7,7 +7,7 @@ import UIKit
 extension Ghostty.Input {
     #if os(iOS)
     /// Stable UIKit key data used to construct and unit-test Ghostty hardware events.
-    struct HardwareKeyDescriptor {
+    nonisolated struct HardwareKeyDescriptor: Sendable {
         let keyCode: UIKeyboardHIDUsage
         let modifierFlags: UIKeyModifierFlags
         let characters: String
@@ -25,6 +25,7 @@ extension Ghostty.Input {
             self.charactersIgnoringModifiers = charactersIgnoringModifiers
         }
 
+        @MainActor
         init(uiKey: UIKey) {
             self.init(
                 keyCode: uiKey.keyCode,
@@ -37,7 +38,7 @@ extension Ghostty.Input {
     #endif
 
     /// `ghostty_input_key_s`
-    struct KeyEvent {
+    nonisolated struct KeyEvent: Sendable {
         let action: Action
         let key: Key
         let text: String?
@@ -159,6 +160,7 @@ extension Ghostty.Input {
         }
 
         /// Create a KeyEvent from a UIKey (iOS hardware keyboard)
+        @MainActor
         init?(uiKey: UIKey, action: Action) {
             self.init(hardwareKey: .init(uiKey: uiKey), action: action)
         }
@@ -217,7 +219,7 @@ extension Ghostty.Input {
 
 extension Ghostty.Input {
     /// `ghostty_input_action_e`
-    enum Action: String, CaseIterable {
+    nonisolated enum Action: String, CaseIterable, Sendable {
         case release
         case press
         case `repeat`

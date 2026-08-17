@@ -169,6 +169,7 @@ struct TerminalThemeSettingsSection: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("vvterm.settings.themePicker.\(context.rawValue)")
         .disabled(allThemeNames.isEmpty)
     }
 

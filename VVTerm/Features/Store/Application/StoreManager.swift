@@ -106,7 +106,7 @@ final class StoreManager: ObservableObject {
     init(
         client: any StoreClient,
         effects: StoreManagerEffects,
-        forceProForTesting: Bool = Self.isForcedProForTestingBuild
+        forceProForTesting: Bool = StoreManager.isForcedProForTestingBuild
     ) {
         self.client = client
         self.effects = effects

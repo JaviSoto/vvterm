@@ -23,7 +23,7 @@ struct TerminalThemePreviewPalette {
 /// Parses terminal theme files to extract colors
 struct ThemeColorParser {
     /// Complete set of terminal colors rendered by the interactive theme preview.
-    struct ThemePreviewValues {
+    nonisolated struct ThemePreviewValues {
         nonisolated static let defaultPaletteHex = [
             "#1D1F21", "#CC6666", "#B5BD68", "#F0C674",
             "#81A2BE", "#B294BB", "#8ABEB7", "#C5C8C6",

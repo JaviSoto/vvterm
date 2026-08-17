@@ -212,6 +212,66 @@ final class TerminalSettingsNavigationUITests: TerminalReconnectUITestCase {
     }
 
     @MainActor
+    func testThemePickerPreviewFitsInLightAndDarkAppearances() throws {
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.terminate()
+            app.launchArguments = [
+                "-AppleLanguages", "(en)",
+                "-AppleLocale", "en_US",
+                "-hasSeenWelcome", "YES",
+                "-iCloudSyncEnabled", "NO",
+                "-security.privacyModeEnabled", "NO",
+                "-security.fullAppLockEnabled", "NO",
+                "-security.lockOnBackground", "NO",
+                "-appearanceMode", appearance,
+            ]
+            app.launch()
+            defer { app.terminate() }
+
+            let settings = app.buttons["vvterm.serverList.settings"]
+            XCTAssertTrue(settings.waitForExistence(timeout: 10))
+            settings.tap()
+
+            let terminalAppearance = app.buttons["vvterm.settings.route.terminalAppearance"]
+            XCTAssertTrue(terminalAppearance.waitForExistence(timeout: 8))
+            terminalAppearance.tap()
+
+            let picker = app.buttons["vvterm.settings.themePicker.darkTheme"]
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            for _ in 0..<3 where !picker.isHittable {
+                app.swipeUp()
+            }
+            XCTAssertTrue(picker.isHittable)
+            picker.tap()
+
+            let page = app.descendants(matching: .any)["vvterm.settings.themePicker.page"]
+            let preview = app.descendants(matching: .any)["vvterm.settings.themePicker.preview"]
+            XCTAssertTrue(page.waitForExistence(timeout: 5))
+            XCTAssertTrue(preview.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["Cancel"].isHittable)
+            XCTAssertTrue(app.buttons["Apply"].isHittable)
+
+            let windowFrame = app.windows.firstMatch.frame
+            XCTAssertGreaterThanOrEqual(preview.frame.minX, windowFrame.minX)
+            XCTAssertLessThanOrEqual(preview.frame.maxX, windowFrame.maxX)
+            XCTAssertLessThan(preview.frame.maxY, windowFrame.maxY)
+
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Theme Picker - \(appearance)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+
+            app.buttons["Cancel"].tap()
+            XCTAssertTrue(
+                app.descendants(matching: .any)["vvterm.settings.page.terminalAppearance"]
+                    .waitForExistence(timeout: 5)
+            )
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testRemoteClipboardShowsOneWarning() throws {
         let app = XCUIApplication()
         app.terminate()
